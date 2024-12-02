@@ -282,3 +282,12 @@ selfDestructMessages BotState{..} fun = forever $! do
           let sec = diffUTCTime selfDestructMessageTime now
           wait $ round sec
           fun (DeleteMessage selfDestructMessageChatId selfDestructMessageId)
+
+replyStats :: BotState -> Text -> IO ()
+replyStats model@BotState{..} txt = do
+  let Settings {..} = botSettings
+  forM_ ownerGroup $ \OwnerGroupSettings{..} -> do
+    let messageReq = (defSendMessage (SomeChatId $ ChatId ownerGroupId) txt)
+          { sendMessageMessageThreadId = Just $! MessageThreadId ownerGroupStatsThreadId
+          }
+    void $ callIO model $ sendMessage messageReq
