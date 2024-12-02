@@ -151,8 +151,14 @@ handleBanViaConsensusPoll model chatId ch@ChatState{..} mVoterId spamer orig con
       -- at this point poll *must* be created
       forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId (Just orig) poll
 
+-- | This message is definitely a spam! So let's:
+--
+-- 1. remove it.
+-- 2. add them to list of spam messages.
+-- 3. add spamer to blocklist.
 updateBlocklistAndMessages :: BotState -> MessageInfo -> BotM ()
-updateBlocklistAndMessages BotState{..} MessageInfo{..} = do
+updateBlocklistAndMessages model@BotState{..} MessageInfo{..} = do
+  void $ call model $ deleteMessage (chatInfoId messageInfoChat) messageInfoId
   forM_ messageInfoText $ \txt' -> do
     let txt = MessageText txt'
     alterCache spamMessages txt (Just . succ . fromMaybe 1)
