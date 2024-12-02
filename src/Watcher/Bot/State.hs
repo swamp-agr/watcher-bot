@@ -114,6 +114,12 @@ withDelay action = do
 call :: Show a => BotState -> ClientM a -> BotM (Maybe a)
 call model action = withDelay $ withLock model action
 
+callIO :: Show a => BotState -> ClientM a -> IO (Maybe a)
+callIO model action = do
+  response <- liftIO (withLock model action)
+  wait 1
+  pure response
+
 data BanState = BanState
   { bannedMessages :: HashSet MessageText
   , bannedChats :: HashSet ChatId

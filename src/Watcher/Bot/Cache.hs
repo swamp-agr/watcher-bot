@@ -21,6 +21,7 @@ import System.Directory
   )
 import System.FilePath ((</>), (<.>))
 
+import qualified Data.Foldable as Fold
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
@@ -53,6 +54,11 @@ dumpCache time dir cache = do
   cacheContent <- evaluate =<< (atomically $! readTVar cache)
   let txt = renderPretty cacheContent
   Text.writeFile cachePath txt
+
+getCacheSize :: Foldable cache => TVar (cache content) -> IO Int
+getCacheSize cache = do
+  content <- atomically $! readTVar cache
+  pure $! Fold.length content
 
 importCache :: (FromDhall a, Monoid a) => FilePath -> IO (TVar a)
 importCache dir = do

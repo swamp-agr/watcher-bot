@@ -85,6 +85,7 @@ data Settings = Settings
 data WorkersSettings = WorkersSettings
   { cleanup :: WorkerSettings
   , dump :: WorkerSettings
+  , statistics :: WorkerSettings
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data WorkerSettings = WorkerSettings

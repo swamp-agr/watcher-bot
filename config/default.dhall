@@ -123,5 +123,10 @@ Extra commands:
         , workerPeriod = WorkerPeriod.Hour
         , workerPeriodUnits = 2
         }
+    , statistics =
+        { workerName = "statistics"
+        , workerPeriod = WorkerPeriod.Day
+        , workerPeriodUnits = 21
+        }
     }
 }

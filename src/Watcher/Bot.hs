@@ -1,8 +1,9 @@
 module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
-import Control.Concurrent.STM (atomically, modifyTVar')
+import Control.Concurrent.STM (TVar, atomically, modifyTVar')
 import Control.Monad (forever, join)
+import Data.Text (Text)
 import GHC.Stack (HasCallStack)
 import Options.Applicative
   ( auto, execParser, help, helper, info, fullDesc, metavar, long, progDesc
@@ -14,6 +15,7 @@ import Telegram.Bot.API
 import Telegram.Bot.Simple
 import Telegram.Bot.Simple.BotApp.Internal 
 
+import qualified Data.Text as Text
 import qualified Options.Applicative as OA
 
 import Watcher.Bot.Cache
@@ -65,11 +67,38 @@ every WorkerSettings{..} action = do
 
 getSelf :: BotState -> IO ()
 getSelf model@BotState{..} = do
-  mResponse <- withLock model getMe
-  wait 1
+  mResponse <- callIO model getMe
   let botItself = maybe (error "getMe failed") (userToUserInfo . responseResult) mResponse
   atomically $ modifyTVar' self (const $ Just botItself)
 
+
+gatherCacheStats :: (a ~ cache content, Foldable cache) => Text -> TVar a -> IO Text
+gatherCacheStats title cache = do
+  cacheSize <- getCacheSize cache
+  pure $ Text.concat
+    [ title, ": ", s2t cacheSize]
+
+gatherStatistics :: BotState -> IO ()
+gatherStatistics model@BotState{..} = every statistics $ do
+  groupsStats <- gatherCacheStats "Groups" groups
+  adminsStats <- gatherCacheStats "Admins" admins
+  usersStats <- gatherCacheStats "Users" users
+  blocklistStats <- gatherCacheStats "Blocklist" blocklist
+  spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages
+  selfDestructionSetStats <- gatherCacheStats "Self-destruct message queue" selfDestructionSet
+  replyStats model $ Text.unlines
+    [ "Statistics"
+    , ""
+    , groupsStats
+    , adminsStats
+    , usersStats
+    , blocklistStats
+    , spamMessagesStats
+    , selfDestructionSetStats
+    ]
+  where
+    Settings {..} = botSettings
+    WorkersSettings {..} = workers
 
 -- | Initiate Telegram Env, 'Model', start Bot, start backends concurrently.
 runTelegramBot :: Model -> IO ()
@@ -79,7 +108,8 @@ runTelegramBot st@BotState{..} = do
     Concurrently (selfDestructMessages st botActionFun) <*
     Concurrently (cleanAllCaches st) <*
     Concurrently (dumpAllCaches st) <*
-    Concurrently (getSelf st)
+    Concurrently (getSelf st) <*
+    Concurrently (gatherStatistics st)
 
 -- | Copy from 'Telegram.Bot.Simple.BotApp'.
 startBotEnv :: BotApp model action -> ClientEnv -> IO (BotEnv model action)
