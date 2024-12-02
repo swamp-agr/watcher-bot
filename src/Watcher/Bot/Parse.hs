@@ -88,8 +88,11 @@ handleBan settings Update{..}
       case messageSentFrom settings msg of
         OwnerGroup -> Nothing
         DirectMessage _userId -> Nothing
-        PublicGroup groupId userId -> Just
-          . BanAction groupId userId (messageMessageId msg) =<< messageReplyToMessage msg
+        PublicGroup groupId userId -> maybe
+          -- prevent flooding chat
+          (Just $! DeleteMessage groupId $ messageMessageId msg)
+          (Just . BanAction groupId userId (messageMessageId msg))
+          (messageReplyToMessage msg)
         PrivateGroup groupId _userId ->
           Just $ SendContactAndQuit groupId $ messageMessageId msg
         Channel groupId -> Just $ SendContactAndQuit groupId $ messageMessageId msg
