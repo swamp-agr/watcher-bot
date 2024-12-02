@@ -143,10 +143,13 @@ handleBanViaConsensusPoll model chatId ch@ChatState{..} mVoterId spamer orig con
         Nothing -> createBanPoll
           model ch chatId spamerId mVoterId consensus spamer
             $! messageInfoId orig
-        Just poll -> 
-          pure $! Just
-            $! maybe poll
-              (\voterId -> fst $! addVoteToPoll ch voterId spamerId poll) mVoterId
+        Just poll -> do
+          let currentPollSize = HS.size (pollVoters poll)
+              nextPollState =
+                maybe poll
+                  (\voterId -> fst $! addVoteToPoll ch voterId spamerId poll) mVoterId
+              pollSizeChanged = currentPollSize /= HS.size (pollVoters nextPollState)
+          pure $! Just (pollSizeChanged, nextPollState)
 
       -- at this point poll *must* be created
       forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId (Just orig) poll
@@ -181,14 +184,13 @@ proceedWithPoll
   -> ChatId
   -> SpamerId
   -> Maybe MessageInfo
-  -> PollState
+  -> (Bool, PollState)
   -> BotM ()
-proceedWithPoll model ch@ChatState{..} chatId spamerId mOrig poll@PollState{..} = do
+proceedWithPoll model ch@ChatState{..} chatId spamerId mOrig (pollChanged, poll@PollState{..}) = do
   let consensus = usersForConsensus chatSettings
       voters = HS.size pollVoters
-      pollStarted = voters <= 1
       enoughToBan = fromIntegral consensus <= voters
-  case (pollStarted && not (isDebugEnabled model), enoughToBan) of
+  case (not pollChanged, enoughToBan) of
     -- Poll message has been originated, nothing to worry about
     (True, _) -> pure ()
     (False, False) ->
@@ -220,7 +222,7 @@ handleVoteBan model chatId ch@ChatState{..} voterId _messageId voteBanId = do
     else case HM.lookup spamerId activePolls of
       -- Race? Poll's been closed but decision was too late? Don't care
       Nothing -> pure ()
-      Just poll@PollState{..} -> case voteBanId of
+      Just poll@PollState{pollMessageId, pollSpamer} -> case voteBanId of
         -- One independent voice is enough to close the poll
         VoteAgainstBan _ _ -> do
           closeBanPoll model ch chatId spamerId
@@ -228,7 +230,8 @@ handleVoteBan model chatId ch@ChatState{..} voterId _messageId voteBanId = do
           selfDestructReply model chatId (ReplyUserRecovered pollSpamer)
         VoteForBan _ _ -> do
           let (newPoll, nextChatState) = addVoteToPoll ch voterId spamerId poll
-          proceedWithPoll model nextChatState chatId spamerId Nothing newPoll
+              pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)
+          proceedWithPoll model nextChatState chatId spamerId Nothing (pollChanged, newPoll)
 
 closeBanPoll :: BotState -> ChatState -> ChatId -> SpamerId -> BotM ()
 closeBanPoll BotState{..} st@ChatState{..} chatId spamerId = do
@@ -249,7 +252,7 @@ createBanPoll
   -> Integer -- votes required for ban decision
   -> UserInfo -- spamer
   -> MessageId
-  -> BotM (Maybe PollState)
+  -> BotM (Maybe (Bool, PollState))
 createBanPoll model@BotState{..} st chatId spamerId mVoterId consensus spamer messageId = do
   let makeButton = uncurry actionButton
       keyboard = InlineKeyboardMarkup
@@ -274,7 +277,7 @@ createBanPoll model@BotState{..} st chatId spamerId mVoterId consensus spamer me
         let pollId = messageMessageId responseResult
             (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId
         writeCache groups chatId nextChatState
-        pure $! Just poll
+        pure $! Just (True, poll)
 
 updateBanPoll
   :: BotState
