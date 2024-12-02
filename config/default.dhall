@@ -34,7 +34,7 @@ let _adminHelp =
 \* Reply with `/spam` command on a spam message in a public chat
   to immediately ban spamer\. Remember, if regular user invokes the command,
   it will trigger the setting that has been set by administrators\.
-\* Use `/s` as a shortcut for `/spam` command.
+\* Use `/s` as a shortcut for `/spam` command\.
 \* Unban accidentally banned user with `/undo @username`
   \(replace it with real username of the user\)
   or `/undo <user_id>` \(again, replace `<user_id>` with userId\),
