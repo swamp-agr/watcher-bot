@@ -2,7 +2,6 @@ module Watcher.Bot.State.User where
 
 import Data.HashSet (HashSet)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
@@ -81,11 +80,11 @@ setSetupMessageUserState st messageId = case userSetupState st of
     in st { userSetupState = newSetup }
 
 data MenuState
-  = MultipleGroupsRoot { multipleGroupsMenu :: Map ChatId Text }
+  = MultipleGroupsRoot { multipleGroupsMenu :: Map ChatId (Maybe Text) }
   | MultipleGroupsSelected
       { multipleGroupsSelectedChat :: ChatId
       , multipleGroupsSelectedSubMenu :: MenuId
-      , multipleGroupsSelectedMenu :: Map ChatId Text
+      , multipleGroupsSelectedMenu :: Map ChatId (Maybe Text)
       }
   | SingleRoot
       { singleGroupChat :: ChatId
@@ -115,13 +114,8 @@ switchMenu ms currentMenuId chatId = case ms of
     , singleGroupSubMenu = selectNextMenu currentMenuId
     }
 
-chatSetToMap :: HashSet (ChatId, Maybe Text) -> Map ChatId Text
-chatSetToMap = Map.fromList . catMaybes . fmap transform . HS.toList
-  where
-    transform (chatId, Just title) = Just (chatId, title)
-    transform _ = Nothing
+chatSetToMap :: HashSet (ChatId, Maybe Text) -> Map ChatId (Maybe Text)
+chatSetToMap = Map.fromList . HS.toList
 
-chatMapToSet :: Map ChatId Text -> HashSet (ChatId, Maybe Text)
-chatMapToSet = HS.fromList . fmap transform . Map.toList
-  where
-    transform (chatId, title) = (chatId, Just title)
+chatMapToSet :: Map ChatId (Maybe Text) -> HashSet (ChatId, Maybe Text)
+chatMapToSet = HS.fromList . Map.toList
