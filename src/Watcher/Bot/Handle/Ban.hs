@@ -254,16 +254,10 @@ createBanPoll
   -> MessageId
   -> BotM (Maybe (Bool, PollState))
 createBanPoll model@BotState{..} st chatId spamerId mVoterId consensus spamer messageId = do
-  let makeButton = uncurry actionButton
-      keyboard = InlineKeyboardMarkup
-        { inlineKeyboardMarkupInlineKeyboard =
-            [ makeButton <$>
-                [ ("Yes", VoteForBan chatId spamerId)
-                , ("No", VoteAgainstBan chatId spamerId)
-                ]
-            ]
+  let keyboard = InlineKeyboardMarkup
+        { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId
         }
-      replyMsg = (toReplyMessage ("Someone decided that this is a spamer. Is it correct? Vote (1/" <> s2t consensus <> ")"))
+      replyMsg = (toReplyMessage (voteMessage (maybe 0 (const 1) mVoterId) consensus))
         { replyMessageReplyToMessageId = Just messageId
         , replyMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
@@ -277,7 +271,7 @@ createBanPoll model@BotState{..} st chatId spamerId mVoterId consensus spamer me
         let pollId = messageMessageId responseResult
             (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId
         writeCache groups chatId nextChatState
-        pure $! Just (True, poll)
+        pure $ Just (True, poll)
 
 updateBanPoll
   :: BotState
@@ -293,18 +287,25 @@ updateBanPoll
   let nextChatState = st { activePolls = HM.insert spamerId poll activePolls }
   writeCache groups chatId nextChatState
 
-  let makeButton = uncurry actionButton
-      keyboard = InlineKeyboardMarkup
-        { inlineKeyboardMarkupInlineKeyboard =
-            [ makeButton <$> [ ("Yes", VoteForBan chatId spamerId), ("No", VoteAgainstBan chatId spamerId) ] ]
+  let keyboard = InlineKeyboardMarkup
+        { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId
         }
-      editMsgTxt = Text.concat
-        [ "Someone decided that this is a spamer. Is it correct? Vote ("
-        , s2t voters , "/", s2t consensus, ")"
-        ]
+      editMsgTxt = voteMessage voters consensus
       editMsg = (toEditMessage editMsgTxt)
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
       editId = EditChatMessageId (SomeChatId chatId) pollMessageId
 
   editMessage editId editMsg
+
+voteMessage :: Int -> Integer -> Text
+voteMessage voters consensus = Text.concat
+  [ "Someone decided that this is a spamer. Is it correct? Vote ("
+  , s2t voters , "/", s2t consensus, ")"
+  ]
+
+voteButtons :: ChatId -> SpamerId -> [[InlineKeyboardButton]]
+voteButtons chatId spamerId = 
+   [ makeButton <$> [ ("Yes", VoteForBan chatId spamerId), ("No", VoteAgainstBan chatId spamerId) ] ]
+  where
+    makeButton = uncurry actionButton
