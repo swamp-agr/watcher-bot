@@ -82,7 +82,7 @@ deriving newtype instance Enum UserId
 
 deriving newtype instance Ord UserId
 
-deriving newtype instance Read UserId
+deriving instance Read UserId
 
 deriving newtype instance FromDhall UserId
 
