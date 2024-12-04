@@ -266,7 +266,7 @@ setupReply model@BotState{..} fromCallback messageId editMsg = do
 replyDone :: HasCallStack => BotState -> MessageId -> BotM ()
 replyDone model messageId = do
   let editMsg = (toEditMessage "Setup completed.")
-  setupReply model True messageId editMsg
+  setupReply model False messageId editMsg
 
 selfDestructMessages :: BotState -> (Action -> IO ()) -> IO ()
 selfDestructMessages BotState{..} fun = forever $! do
