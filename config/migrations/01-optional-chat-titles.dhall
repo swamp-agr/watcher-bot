@@ -1,4 +1,4 @@
-let Prelude/map = ./common/map.dhall
+let Prelude/map = ../common/map.dhall
 
 let IntTextMap = { mapKey : Integer, mapValue : Text }
 
