@@ -87,12 +87,8 @@ refreshChatAdmins :: BotState -> ChatId -> BotM ()
 refreshChatAdmins model@BotState{..} chatId = do
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
-  let st@ChatState{..} = fromMaybe (newChatState botSettings) mChatState
-      outdated = case chatAdminsCheckedAt of
-        Nothing -> True
-        Just day -> UTCTime day 0 `notLongAgoEnough` now
-      refreshNeeded = HS.null chatAdmins || outdated
-  when refreshNeeded $ do
+  let st = fromMaybe (newChatState botSettings) mChatState
+  when True $ do
     mResponse <- call model (getChatAdministrators (SomeChatId chatId))
     forM_ mResponse $ \response -> if not (responseOk response)
       then liftIO (log' @String "Cannot retrieve admins")
