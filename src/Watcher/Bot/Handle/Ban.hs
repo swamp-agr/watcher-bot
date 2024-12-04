@@ -199,6 +199,7 @@ proceedWithPoll model ch@ChatState{..} chatId spamerId mOrig (pollChanged, poll@
       forM_ mOrig $! updateBlocklistAndMessages model
       unlessDebug model $! banSpamerInChat model chatId pollSpamer
       closeBanPoll model ch chatId spamerId
+      void $ call model $ deleteMessage chatId pollSpamMessageId
       void $ call model $ deleteMessage chatId pollMessageId
       selfDestructReply model chatId (ReplyConsensus voters)
 
