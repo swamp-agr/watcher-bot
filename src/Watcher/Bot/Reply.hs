@@ -181,7 +181,7 @@ replyManyGroupsMenu model messageId adminGroups = do
   let makeButton (chatId, mchatTitle) =
         [ actionButton 
             (fromMaybe ("Untitled chat: " <> s2t chatId) mchatTitle)
-            chatId
+            (Multi chatId)
         ]
       setupKeyboard = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = makeButton <$> HS.toList adminGroups
