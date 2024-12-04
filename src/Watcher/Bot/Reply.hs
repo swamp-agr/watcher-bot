@@ -125,7 +125,8 @@ withCompletedSetup model@BotState{..} chatId action = do
     SetupInProgress {} -> selfDestructReply model chatId ReplyIncompletedSetup
     SetupCompleted {} -> action ch
 
-replyMenu :: BotState -> MenuState -> MessageId -> ChatId -> UserId -> BotM ()
+-- | This one is coming from callback!
+replyMenu :: BotState -> MenuState -> SetupMessageId -> ChatId -> UserId -> BotM ()
 replyMenu model menuState messageId chatId  _userId = case menuState of
   MultipleGroupsRoot {..} -> replyManyGroupsMenu model messageId
     $ chatMapToSet multipleGroupsMenu
@@ -133,9 +134,9 @@ replyMenu model menuState messageId chatId  _userId = case menuState of
     replySingleGroupMenu model chatId messageId multipleGroupsSelectedSubMenu
   SingleRoot {..} -> replySingleGroupMenu model chatId messageId singleGroupSubMenu
 
-replySingleGroupMenu :: BotState -> ChatId -> MessageId -> MenuId -> BotM ()
+replySingleGroupMenu :: BotState -> ChatId -> SetupMessageId -> MenuId -> BotM ()
 replySingleGroupMenu model chatId messageId = \case
-  MenuRoot -> replySingleGroupRoot model True True (Just chatId) messageId
+  MenuRoot -> replySingleGroupRoot model True (Just chatId) messageId
   ConsensusRoot -> replyConsensusRoot model messageId
   SpamCmdRoot -> replySpamCmdRoot model messageId
   QuarantineRoot -> replyQuarantineRoot model messageId
@@ -144,12 +145,12 @@ replySingleGroupMenu model chatId messageId = \case
   Consensus _consensus -> replyConsensusRoot model messageId
   SpamCmd _cmd -> replySpamCmdRoot model messageId
   Quarantine _messagesInQuarantine -> replyQuarantineRoot model messageId  
-  BotIsAdmin -> replySingleGroupRoot model True True (Just chatId) messageId
+  BotIsAdmin -> replySingleGroupRoot model True (Just chatId) messageId
 
 replySingleGroupRoot
   :: HasCallStack
-  => BotState -> Bool -> Bool -> Maybe ChatId -> MessageId -> BotM ()
-replySingleGroupRoot  model@BotState{..} True fromCallback mChatId messageId = do
+  => BotState -> Bool -> Maybe ChatId -> SetupMessageId -> BotM ()
+replySingleGroupRoot  model@BotState{..} True mChatId messageId = do
   mChatState <- maybe (pure Nothing) (lookupCache groups) mChatId
   let setupKeyboard0 = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = fmap (fmap (uncurry actionButton))
@@ -164,8 +165,8 @@ replySingleGroupRoot  model@BotState{..} True fromCallback mChatId messageId = d
       editMsg = (toEditMessage editMsgTxt)
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup setupKeyboard0
         }
-  setupReply model fromCallback messageId editMsg
-replySingleGroupRoot _model False _fromCallback _mChatId _messageId = do
+  setupReply model messageId editMsg
+replySingleGroupRoot _model False _mChatId _messageId = do
   let txt = Text.concat -- FIXME: configurable
         [ "Group set up has already been initiated by some other admin. "
         , "Try tomorrow or contact other group admins"
@@ -175,7 +176,7 @@ replySingleGroupRoot _model False _fromCallback _mChatId _messageId = do
   reply replyMsg
 
 replyManyGroupsMenu
-  :: HasCallStack => BotState -> MessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
+  :: HasCallStack => BotState -> SetupMessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
 replyManyGroupsMenu model messageId adminGroups = do
   let makeButton (ChatId chatId, mchatTitle) =
         [ actionButton 
@@ -188,10 +189,10 @@ replyManyGroupsMenu model messageId adminGroups = do
       editMsg = (toEditMessage "Choose group to set up") -- FIXME: configurable
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup setupKeyboard
         }
-  setupReply model False messageId editMsg
+  setupReply model messageId editMsg
 
 replyConsensusRoot
-  :: HasCallStack => BotState -> MessageId -> BotM ()
+  :: HasCallStack => BotState -> SetupMessageId -> BotM ()
 replyConsensusRoot model messageId = do
   let makeButton ix = [ actionButton (s2t ix) (Consensus ix) ]
       keyboard = InlineKeyboardMarkup
@@ -201,10 +202,10 @@ replyConsensusRoot model messageId = do
       editMsg = (toEditMessage "Set up amount of users necessary for ban consensus")
        { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
        }
-  setupReply model True messageId editMsg
+  setupReply model messageId editMsg
 
 replySpamCmdRoot
-  :: HasCallStack => BotState -> MessageId -> BotM ()
+  :: HasCallStack => BotState -> SetupMessageId -> BotM ()
 replySpamCmdRoot model messageId = do
   let makeButton (label, action) =
         [ actionButton label (SpamCmd action) ]
@@ -218,9 +219,9 @@ replySpamCmdRoot model messageId = do
       editMsg = (toEditMessage "Set up /spam command")
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
-  setupReply model True messageId editMsg
+  setupReply model messageId editMsg
 
-replyQuarantineRoot :: HasCallStack => BotState -> MessageId -> BotM ()
+replyQuarantineRoot :: HasCallStack => BotState -> SetupMessageId -> BotM ()
 replyQuarantineRoot model messageId = do
   let makeButton ix = [ actionButton (s2t ix) (Quarantine ix) ]
       keyboard = InlineKeyboardMarkup
@@ -234,39 +235,38 @@ replyQuarantineRoot model messageId = do
       editMsg = (toEditMessage msg)
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
-  setupReply model True messageId editMsg
+  setupReply model messageId editMsg
 
-setupReply :: BotState -> Bool -> MessageId -> EditMessage -> BotM ()
-setupReply model@BotState{..} fromCallback messageId editMsg = do
+setupReply :: BotState -> SetupMessageId -> EditMessage -> BotM ()
+setupReply model@BotState{..} setupMessageId editMsg = do
   mChatId <- currentChatId
-  forM_ mChatId $ \chatId -> do
-    if fromCallback
-      then do
-        let editId = EditChatMessageId (SomeChatId chatId) messageId
-        void $ editMessage editId editMsg
-      else 
-        let userId = coerce chatId -- in DM chatId is equal to userId
-        in lookupCache users userId >>= \case
-          Nothing -> pure ()
-          Just UserState{userSetupState} -> case getUserSetupMessageId userSetupState of
-            Just menuMessageId -> do
-              let editId = EditChatMessageId (SomeChatId chatId) menuMessageId
-              void $ editMessage editId editMsg
-            Nothing -> do
-              let replyMsg = (editMessageToReplyMessage editMsg)
-                    { replyMessageReplyToMessageId = Just messageId }
-                  req = replyMessageToSendMessageRequest (SomeChatId chatId) replyMsg
-              mResponse <- call model $ sendMessage req
-              forM_ mResponse $ \Response{..} -> when responseOk $ do
-                let menuMessageId = messageMessageId responseResult
-                    go Nothing = Nothing
-                    go (Just st) = Just $! setSetupMessageUserState st menuMessageId
-                alterCache users userId go
+  forM_ mChatId $ \chatId -> case setupMessageId of
+    CallbackSetup messageId -> do
+      let editId = EditChatMessageId (SomeChatId chatId) messageId
+      void $ editMessage editId editMsg
+    ReplySetup messageId -> do
+      let userId = coerce chatId -- in DM chatId is equal to userId
+      lookupCache users userId >>= \case
+        Nothing -> pure ()
+        Just UserState{userSetupState} -> case getUserSetupMessageId userSetupState of
+          Just menuMessageId -> do
+            let editId = EditChatMessageId (SomeChatId chatId) menuMessageId
+            void $ editMessage editId editMsg
+          Nothing -> do
+            let replyMsg = (editMessageToReplyMessage editMsg)
+                  { replyMessageReplyToMessageId = Just messageId }
+                req = replyMessageToSendMessageRequest (SomeChatId chatId) replyMsg
+            mResponse <- call model $ sendMessage req
+            forM_ mResponse $ \Response{..} -> when responseOk $ do
+              let menuMessageId = messageMessageId responseResult
+                  go Nothing = Nothing
+                  go (Just st) = Just $! setSetupMessageUserState st menuMessageId
+              alterCache users userId go
 
-replyDone :: HasCallStack => BotState -> MessageId -> BotM ()
+replyDone :: HasCallStack => BotState -> SetupMessageId -> BotM ()
 replyDone model messageId = do
   let editMsg = (toEditMessage "Setup completed.")
-  setupReply model False messageId editMsg
+  setupReply model messageId editMsg
 
 selfDestructMessages :: BotState -> (Action -> IO ()) -> IO ()
 selfDestructMessages BotState{..} fun = forever $! do

@@ -76,13 +76,13 @@ handleNavigate model@BotState{..} userChatId messageId menuId = do
                 { eventUserId = Just userId }
           sendEvent model evt
           completeGroupSetup model chatId userId
-          replyDone model messageId
+          replyDone model (CallbackSetup messageId)
 
         when (setupMenu menuId) $ groupSetup model chatId userId menuId
         when (menuId == BotIsAdmin) $ refreshChatAdmins model chatId
 
         writeCache users userId newerUserState
-        replyMenu model newMenuState messageId chatId userId
+        replyMenu model newMenuState (CallbackSetup messageId) chatId userId
 
 refreshChatAdmins :: BotState -> ChatId -> BotM ()
 refreshChatAdmins model@BotState{..} chatId = do
@@ -122,7 +122,7 @@ setupMultipleGroups
   :: BotState -> UserId -> MessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
 setupMultipleGroups model userId messageId userGroups = do
   setMultipleRoot model userId userGroups
-  replyManyGroupsMenu model messageId userGroups
+  replyManyGroupsMenu model (ReplySetup messageId) userGroups
 
 setMultipleRoot :: BotState -> UserId -> HashSet (ChatId, Maybe Text) -> BotM ()
 setMultipleRoot BotState{..} userId userGroups = alterCache users userId go
@@ -147,7 +147,7 @@ setupSingleGroup model userId messageId group = do
   readyOrNot <- initGroupSetupMaybe model userId group
   when readyOrNot $ setSingleRoot model userId (fst group)
   
-  replySingleGroupRoot model readyOrNot False Nothing messageId 
+  replySingleGroupRoot model readyOrNot Nothing (ReplySetup messageId)
 
 setSingleRoot :: BotState -> UserId -> ChatId -> BotM ()
 setSingleRoot BotState{..} userId chatId = alterCache users userId go
