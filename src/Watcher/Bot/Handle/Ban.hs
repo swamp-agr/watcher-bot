@@ -1,5 +1,7 @@
 module Watcher.Bot.Handle.Ban where
 
+import Control.Applicative ((<|>))
+import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
@@ -129,7 +131,7 @@ handleBanViaConsensusPoll
   -> MessageInfo
   -> Integer
   -> BotM ()
-handleBanViaConsensusPoll model chatId ch@ChatState{..} mVoterId spamer orig consensus = do
+handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId spamer orig consensus = do
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere model (userInfoId spamer)
   if userAlreadyBanned
     then do
@@ -137,11 +139,13 @@ handleBanViaConsensusPoll model chatId ch@ChatState{..} mVoterId spamer orig con
       banSpamerInChat model chatId spamer
       selfDestructReply model chatId (ReplyUserAlreadyBanned spamer)
     else do
+      botItself <- liftIO $ readTVarIO self
       let spamerId = SpamerId $! userInfoId spamer
+          mVoterIdOrBotId = mVoterId <|> ((VoterId . userInfoId) <$> botItself)
           mPollState = HM.lookup spamerId activePolls
       mPoll <- case mPollState of
         Nothing -> createBanPoll
-          model ch chatId spamerId mVoterId consensus spamer
+          model ch chatId spamerId mVoterIdOrBotId consensus spamer
             $! messageInfoId orig
         Just poll -> do
           let currentPollSize = HS.size (pollVoters poll)
