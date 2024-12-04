@@ -13,7 +13,6 @@ import Telegram.Bot.Simple
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
-import qualified Data.Map.Strict as Map
 
 import Watcher.Bot.Analytics
 import Watcher.Bot.Cache
@@ -112,10 +111,7 @@ refreshChatAdmins model@BotState{..} chatId = do
 
         forM_ newChatAdmins $ \adminId -> do
           let go Nothing = Just $! HS.singleton (chatId, Nothing)
-              go (Just set) = Just $! case Map.lookup chatId (chatSetToMap set) of
-                Just (Just _title) -> set
-                -- otherwise, override value in the set
-                _ -> HS.insert (chatId, mChatTitle) set
+              go (Just set) = Just $! HS.insert (chatId, mChatTitle) set
           alterCache admins adminId go
   pure ()
 
