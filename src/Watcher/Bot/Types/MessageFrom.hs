@@ -34,3 +34,13 @@ messageSentFrom botSettings Message{..} =
            (True, True) -> withUser (PublicGroup cid)
            (True, False) -> withUser (PrivateGroup cid)
            (False, _) -> withUser DirectMessage
+
+data SetupMessageId
+  = CallbackSetup MessageId
+  | ReplySetup MessageId
+  deriving (Eq, Show)
+
+setupToMessageId :: SetupMessageId -> MessageId
+setupToMessageId = \case
+  CallbackSetup msgId -> msgId
+  ReplySetup msgId -> msgId

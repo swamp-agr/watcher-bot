@@ -53,7 +53,7 @@ debugSetup model@BotState{..} Message{..} = do
     alterCache groups chatId go
     writeCache admins userId' $! HS.singleton group
   when readyOrNot $ forM_ mUserId $ \userId' -> setSingleRoot model userId' (fst group)
-  replySingleGroupRoot model readyOrNot False (Just chatId) messageMessageId
+  replySingleGroupRoot model readyOrNot (Just chatId) (ReplySetup messageMessageId)
 
 debugSpam :: BotState -> Message -> BotM ()
 debugSpam model@BotState{..} msg = do
