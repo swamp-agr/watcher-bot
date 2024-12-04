@@ -178,7 +178,7 @@ replySingleGroupRoot _model False _mChatId _messageId = do
 replyManyGroupsMenu
   :: HasCallStack => BotState -> SetupMessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
 replyManyGroupsMenu model messageId adminGroups = do
-  let makeButton (ChatId chatId, mchatTitle) =
+  let makeButton (chatId, mchatTitle) =
         [ actionButton 
             (fromMaybe ("Untitled chat: " <> s2t chatId) mchatTitle)
             chatId
