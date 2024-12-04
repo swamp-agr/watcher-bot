@@ -269,7 +269,7 @@ createBanPoll model@BotState{..} st chatId spamerId mVoterId consensus spamer me
       then pure Nothing
       else do
         let pollId = messageMessageId responseResult
-            (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId
+            (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId messageId
         writeCache groups chatId nextChatState
         pure $ Just (True, poll)
 

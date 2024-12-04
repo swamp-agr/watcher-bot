@@ -74,12 +74,13 @@ startBanPoll
   :: ChatState
   -> Maybe VoterId
   -> SpamerId
-  -> UserInfo -- Spamer
+  -> UserInfo -- ^ Spamer
   -> MessageId -- ^ poll message id
+  -> MessageId -- ^ spamer message id
   -> (PollState, ChatState)
-startBanPoll st@ChatState{..} mVoterId spamerId pollSpamer pollMessageId =
+startBanPoll st@ChatState{..} mVoterId spamerId pollSpamer pollMessageId pollSpamMessageId =
   let newPoll = PollState
-        { pollMessageId, pollSpamer
+        { pollMessageId, pollSpamer, pollSpamMessageId
         , pollVoters = maybe HS.empty HS.singleton mVoterId
         }
       poll = case HM.lookup spamerId activePolls of
@@ -117,5 +118,6 @@ data PollState = PollState
   { pollMessageId :: MessageId
   , pollVoters :: HashSet VoterId
   , pollSpamer :: UserInfo
+  , pollSpamMessageId :: MessageId
   }
   deriving (Show, Eq, Generic, FromDhall, ToDhall)

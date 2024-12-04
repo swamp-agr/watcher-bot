@@ -88,7 +88,7 @@ data Action
 
   -- ban/undo
   | BanAction ChatId UserId MessageId Message
-  | UnbanAction ChatId UserId MessageId SomeChatId 
+  | UnbanAction ChatId UserId MessageId SomeChatId
 
   -- contact
   | SendContactAndQuit ChatId MessageId
