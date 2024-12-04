@@ -94,22 +94,25 @@ refreshChatAdmins model@BotState{..} chatId = do
       refreshNeeded = HS.null chatAdmins || outdated
   when refreshNeeded $ do
     mResponse <- call model (getChatAdministrators (SomeChatId chatId))
-    forM_ mResponse $ \Response{..} -> if not responseOk
+    forM_ mResponse $ \response -> if not (responseOk response)
       then liftIO (log' @String "Cannot retrieve admins")
       else do
         mBot <- liftIO $ atomically $ readTVar self
-        let newChatAdmins = membersToAdminIds responseResult
+        let newChatAdmins = membersToAdminIds (responseResult response)
             newState = st
               { chatAdminsCheckedAt = Just $ utctDay now
               , chatAdmins = newChatAdmins
               , botIsAdmin = maybe False (flip HS.member newChatAdmins . userInfoId) mBot
               }
         writeCache groups chatId newState
-        
+
+        mChatResponse <- call model $ getChat (SomeChatId chatId)
+        let mChatTitle = chatFullInfoTitle =<< (responseResult <$> mChatResponse)
+
         forM_ newChatAdmins $ \adminId -> do
           let go Nothing = Just $! HS.singleton (chatId, Nothing)
               go (Just set) = Just $! if Map.member chatId (chatSetToMap set)
-                then HS.insert (chatId, Nothing) set
+                then HS.insert (chatId, mChatTitle) set
                 else set
           alterCache admins adminId go
   pure ()
