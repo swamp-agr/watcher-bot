@@ -141,7 +141,7 @@ replySingleGroupMenu model chatId messageId = \case
   SpamCmdRoot -> replySpamCmdRoot model messageId
   QuarantineRoot -> replyQuarantineRoot model messageId
   Done -> replyDone model messageId 
-  Multi _chatId -> pure ()
+  Multi chatId -> replySingleGroupRoot model True (Just chatId) messageId
   Consensus _consensus -> replyConsensusRoot model messageId
   SpamCmd _cmd -> replySpamCmdRoot model messageId
   Quarantine _messagesInQuarantine -> replyQuarantineRoot model messageId  
