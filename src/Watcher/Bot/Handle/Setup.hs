@@ -112,9 +112,10 @@ refreshChatAdmins model@BotState{..} chatId = do
 
         forM_ newChatAdmins $ \adminId -> do
           let go Nothing = Just $! HS.singleton (chatId, Nothing)
-              go (Just set) = Just $! if Map.member chatId (chatSetToMap set)
-                then HS.insert (chatId, mChatTitle) set
-                else set
+              go (Just set) = Just $! case Map.lookup chatId (chatSetToMap set) of
+                Just (Just _title) -> set
+                -- otherwise, override value in the set
+                _ -> HS.insert (chatId, mChatTitle) set
           alterCache admins adminId go
   pure ()
 
