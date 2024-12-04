@@ -24,6 +24,7 @@ import qualified Data.Text as Text
 import Watcher.Bot.Analytics
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
+import Watcher.Bot.Handle.Contact
 import Watcher.Bot.Reply
 import Watcher.Bot.Settings
 import Watcher.Bot.State
@@ -87,6 +88,7 @@ analyseMessage model chatId ch userId message = do
                 sendEvent model (chatEvent now chatId EventGroupRecogniseProbablySpam)
               MostLikelySpamMessage _ -> do
                 sendEvent model (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+                forwardToOwnersMaybe model Spam chatId (messageInfoId messageInfo)
                 handleBanByRegularUser model chatId ch Nothing messageInfo
 
 incrementQuarantineCounter
