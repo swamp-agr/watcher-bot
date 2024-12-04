@@ -76,6 +76,7 @@ handleNavigate model@BotState{..} userChatId messageId menuId = do
                 { eventUserId = Just userId }
           sendEvent model evt
           completeGroupSetup model chatId userId
+          replyDone model messageId
 
         when (setupMenu menuId) $ groupSetup model chatId userId menuId
         when (menuId == BotIsAdmin) $ refreshChatAdmins model chatId

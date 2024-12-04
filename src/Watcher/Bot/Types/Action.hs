@@ -63,7 +63,7 @@ selectNextMenu = \case
   SpamCmd _ -> MenuRoot
   Quarantine _ -> MenuRoot
   BotIsAdmin -> MenuRoot
-  Done -> Done
+  Done -> MenuRoot
   x -> x
 
 setupMenu :: MenuId -> Bool
