@@ -135,7 +135,7 @@ replyMenu model menuState messageId chatId  _userId = case menuState of
 
 replySingleGroupMenu :: BotState -> ChatId -> MessageId -> MenuId -> BotM ()
 replySingleGroupMenu model chatId messageId = \case
-  MenuRoot -> replySingleGroupRoot model True False (Just chatId) messageId
+  MenuRoot -> replySingleGroupRoot model True True (Just chatId) messageId
   ConsensusRoot -> replyConsensusRoot model messageId
   SpamCmdRoot -> replySpamCmdRoot model messageId
   QuarantineRoot -> replyQuarantineRoot model messageId
@@ -144,7 +144,7 @@ replySingleGroupMenu model chatId messageId = \case
   Consensus _consensus -> replyConsensusRoot model messageId
   SpamCmd _cmd -> replySpamCmdRoot model messageId
   Quarantine _messagesInQuarantine -> replyQuarantineRoot model messageId  
-  BotIsAdmin -> replySingleGroupRoot model True False (Just chatId) messageId
+  BotIsAdmin -> replySingleGroupRoot model True True (Just chatId) messageId
 
 replySingleGroupRoot
   :: HasCallStack
