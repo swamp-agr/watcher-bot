@@ -102,7 +102,7 @@ library
                       , StrictData
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.2.1
+    build-depends:    base
                     , aeson
                     , async
                     , base16-bytestring
@@ -149,7 +149,7 @@ executable watcher-bot
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.17.2.1,
+        base,
         watcher-bot
 
     -- Directories containing source files.
