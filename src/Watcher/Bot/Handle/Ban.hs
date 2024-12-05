@@ -156,7 +156,7 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
           pure $! Just (pollSizeChanged, nextPollState)
 
       -- at this point poll *must* be created
-      forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId (Just orig) poll
+      forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId mVoterId (Just orig) poll
 
 -- | This message is definitely a spam! So let's:
 --
@@ -187,13 +187,15 @@ proceedWithPoll
   -> ChatState
   -> ChatId
   -> SpamerId
+  -> Maybe VoterId
   -> Maybe MessageInfo
   -> (Bool, PollState)
   -> BotM ()
-proceedWithPoll model ch@ChatState{..} chatId spamerId mOrig (pollChanged, poll@PollState{..}) = do
+proceedWithPoll model ch@ChatState{..} chatId spamerId voterId mOrig (pollChanged, poll@PollState{..}) = do
   let consensus = usersForConsensus chatSettings
       voters = HS.size pollVoters
-      enoughToBan = fromIntegral consensus <= voters
+      checkVoterId = (`HS.member` chatAdmins) . coerce @_ @UserId
+      enoughToBan = fromIntegral consensus <= voters || maybe False checkVoterId voterId
   case (not pollChanged, enoughToBan) of
     -- Poll message has been originated, nothing to worry about
     (True, _) -> pure ()
@@ -236,7 +238,7 @@ handleVoteBan model chatId ch@ChatState{..} voterId _messageId voteBanId = do
         VoteForBan _ _ -> do
           let (newPoll, nextChatState) = addVoteToPoll ch voterId spamerId poll
               pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)
-          proceedWithPoll model nextChatState chatId spamerId Nothing (pollChanged, newPoll)
+          proceedWithPoll model nextChatState chatId spamerId (Just voterId) Nothing (pollChanged, newPoll)
 
 closeBanPoll :: BotState -> ChatState -> ChatId -> SpamerId -> BotM ()
 closeBanPoll BotState{..} st@ChatState{..} chatId spamerId = do
@@ -310,7 +312,7 @@ voteMessage voters consensus = Text.concat
   ]
 
 voteButtons :: ChatId -> SpamerId -> [[InlineKeyboardButton]]
-voteButtons chatId spamerId = 
+voteButtons chatId spamerId =
    [ makeButton <$> [ ("Yes", VoteForBan chatId spamerId), ("No", VoteAgainstBan chatId spamerId) ] ]
   where
     makeButton = uncurry actionButton
