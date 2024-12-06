@@ -2,7 +2,7 @@ module Watcher.Bot.Handle.Ban where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent.STM (readTVarIO)
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, void, when, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe, isJust)
@@ -143,20 +143,21 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
       let spamerId = SpamerId $! userInfoId spamer
           mVoterIdOrBotId = mVoterId <|> ((VoterId . userInfoId) <$> botItself)
           mPollState = HM.lookup spamerId activePolls
-      mPoll <- case mPollState of
-        Nothing -> createBanPoll
-          model ch chatId spamerId mVoterIdOrBotId consensus spamer
-            $! messageInfoId orig
-        Just poll -> do
-          let currentPollSize = HS.size (pollVoters poll)
-              nextPollState =
-                maybe poll
-                  (\voterId -> fst $! addVoteToPoll ch voterId spamerId poll) mVoterId
-              pollSizeChanged = currentPollSize /= HS.size (pollVoters nextPollState)
-          pure $! Just (pollSizeChanged, nextPollState)
+      unless (coerce spamerId `HS.member` chatAdmins) $ do
+        mPoll <- case mPollState of
+          Nothing -> createBanPoll
+            model ch chatId spamerId mVoterIdOrBotId consensus spamer
+              $! messageInfoId orig
+          Just poll -> do
+            let currentPollSize = HS.size (pollVoters poll)
+                nextPollState =
+                  maybe poll
+                    (\voterId -> fst $! addVoteToPoll ch voterId spamerId poll) mVoterId
+                pollSizeChanged = currentPollSize /= HS.size (pollVoters nextPollState)
+            pure $! Just (pollSizeChanged, nextPollState)
 
-      -- at this point poll *must* be created
-      forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId mVoterId (Just orig) poll
+        -- at this point poll *must* be created
+        forM_ mPoll $ \poll -> proceedWithPoll model ch chatId spamerId mVoterId (Just orig) poll
 
 -- | This message is definitely a spam! So let's:
 --
