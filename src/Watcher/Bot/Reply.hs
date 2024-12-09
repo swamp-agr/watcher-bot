@@ -83,8 +83,8 @@ renderAnswer = \case
       , " has been successfully unbanned."
       ]
 
-selfDestructReply :: BotState -> ChatId -> ReplyAnswerType -> BotM ()
-selfDestructReply model@BotState{..} chatId answer = do
+selfDestructReply :: BotState -> ChatId -> ChatState -> ReplyAnswerType -> BotM ()
+selfDestructReply model@BotState{..} chatId ChatState{..} answer = when selfDestroyEnabled $ do
   now <- liftIO getCurrentTime
   let replyMsg = toReplyMessage (renderAnswer answer)
       req = replyMessageToSendMessageRequest (SomeChatId chatId) replyMsg
@@ -97,6 +97,8 @@ selfDestructReply model@BotState{..} chatId answer = do
           , selfDestructMessageTime = addUTCTime 20 now -- FIXME: configurable
           }
     liftIO $! atomically $! modifyTVar' selfDestructionSet $! Set.insert msg
+  where
+    GroupSettings{..} = chatSettings
 
 replyCallAdmins :: ChatId -> SpamerId -> [Text] -> MessageInfo -> BotM ()
 replyCallAdmins chatId spamerId adminUsernames originalMessage = do
@@ -121,8 +123,8 @@ withCompletedSetup model@BotState{..} chatId action = do
   mChatState <- lookupCache groups chatId
   -- absence of chat state should be ignored
   forM_ mChatState $ \ch@ChatState{..} -> case chatSetup of
-    SetupNone -> selfDestructReply model chatId ReplyNoSetup
-    SetupInProgress {} -> selfDestructReply model chatId ReplyIncompletedSetup
+    SetupNone -> selfDestructReply model chatId ch ReplyNoSetup
+    SetupInProgress {} -> selfDestructReply model chatId ch ReplyIncompletedSetup
     SetupCompleted {} -> action ch
 
 -- | This one is coming from callback!
@@ -140,11 +142,13 @@ replySingleGroupMenu model chatId messageId = \case
   ConsensusRoot -> replyConsensusRoot model messageId
   SpamCmdRoot -> replySpamCmdRoot model messageId
   QuarantineRoot -> replyQuarantineRoot model messageId
+  SelfDestroyRoot -> replySelfDestroyRoot model messageId
   Done -> replyDone model messageId 
   Multi selectedChatId -> replySingleGroupRoot model True (Just selectedChatId) messageId
   Consensus _consensus -> replyConsensusRoot model messageId
   SpamCmd _cmd -> replySpamCmdRoot model messageId
   Quarantine _messagesInQuarantine -> replyQuarantineRoot model messageId  
+  SelfDestroy _enabled -> replySelfDestroyRoot model messageId  
   BotIsAdmin -> replySingleGroupRoot model True (Just chatId) messageId
 
 replySingleGroupRoot
@@ -158,6 +162,7 @@ replySingleGroupRoot  model@BotState{..} True mChatId messageId = do
             , [ ("/spam command", SpamCmdRoot) ]
             , [ ("Quarantine duration (in messages)", QuarantineRoot) ]
             , [ ("Is Bot admin?", BotIsAdmin) ]
+            , [ ("Self-destroyable messages", SelfDestroyRoot) ]
             , [ ("Complete", Done) ]
             ]
         }
@@ -233,6 +238,22 @@ replyQuarantineRoot model messageId = do
         , "Once limit is reached, user is no longer in \"quarantine\"."
         ]
       editMsg = (toEditMessage msg)
+        { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
+        }
+  setupReply model messageId editMsg
+
+replySelfDestroyRoot :: HasCallStack => BotState -> SetupMessageId -> BotM ()
+replySelfDestroyRoot model messageId = do
+  let makeButton (label, action) =
+        [ actionButton label (SelfDestroy action) ]
+      keyboard = InlineKeyboardMarkup
+        { inlineKeyboardMarkupInlineKeyboard = makeButton
+          <$> [ ("Enabled", True)
+              , ("Disabled", False)
+              ]
+        }
+      -- FIXME: configurable
+      editMsg = (toEditMessage "Self-destroyable messages")
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
   setupReply model messageId editMsg

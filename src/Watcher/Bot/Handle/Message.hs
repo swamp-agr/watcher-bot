@@ -71,7 +71,7 @@ analyseMessage model chatId ch userId message = do
         let spamer = userToUserInfo spamerUser
         updateBlocklistAndMessages model messageInfo
         banSpamerInChat model chatId spamer
-        selfDestructReply model chatId (ReplyUserAlreadyBanned spamer)
+        selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
       forM_ (messageNewChatMembers message) $ addToQuarantine model chatId ch
       knownSpamMessage <- isKnownSpamMessage model messageInfo

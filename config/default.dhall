@@ -59,6 +59,7 @@ in
     { usersForConsensus = +3
     , spamCommandAction = SpamCommandAction.SCPoll
     , messagesInQuarantine = +5
+    , selfDestroyEnabled = True
     }
 , scores =
     { scoreUserHasNoUsername = 200

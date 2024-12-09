@@ -62,7 +62,7 @@ handleAdminBan model@BotState{..} chatId ch@ChatState{..} userId messageId admin
             banSpamerInChat model chatId spamer
             let nextState = ch { adminCalls = HM.delete spamerId adminCalls }
             writeCache groups chatId nextState
-            selfDestructReply model chatId (ReplyUserAlreadyBanned spamer)
+            selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
 
 banSpamerInChat :: BotState -> ChatId -> UserInfo -> BotM ()
 banSpamerInChat model chatId spamer = do
@@ -137,7 +137,7 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
     then do
       updateBlocklistAndMessages model orig
       banSpamerInChat model chatId spamer
-      selfDestructReply model chatId (ReplyUserAlreadyBanned spamer)
+      selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
       botItself <- liftIO $ readTVarIO self
       let spamerId = SpamerId $! userInfoId spamer
@@ -208,7 +208,7 @@ proceedWithPoll model ch@ChatState{..} chatId spamerId voterId mOrig (pollChange
       closeBanPoll model ch chatId spamerId
       void $ call model $ deleteMessage chatId pollSpamMessageId
       void $ call model $ deleteMessage chatId pollMessageId
-      selfDestructReply model chatId (ReplyConsensus voters)
+      selfDestructReply model chatId ch (ReplyConsensus voters)
 
 handleVoteBan
   :: BotState
@@ -235,7 +235,7 @@ handleVoteBan model chatId ch@ChatState{..} voterId _messageId voteBanId = do
         VoteAgainstBan _ _ -> do
           closeBanPoll model ch chatId spamerId
           void $ call model $ deleteMessage chatId pollMessageId
-          selfDestructReply model chatId (ReplyUserRecovered pollSpamer)
+          selfDestructReply model chatId ch (ReplyUserRecovered pollSpamer)
         VoteForBan _ _ -> do
           let (newPoll, nextChatState) = addVoteToPoll ch voterId spamerId poll
               pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)

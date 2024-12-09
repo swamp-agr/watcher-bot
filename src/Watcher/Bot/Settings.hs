@@ -22,6 +22,7 @@ data GroupSettings = GroupSettings
   { usersForConsensus :: Integer -- ^ Amount of users needed to vote for ban.
   , spamCommandAction :: SpamCommand -- ^ Whether "/spam" enabled or not and what action should be performed.
   , messagesInQuarantine :: Integer -- ^ Amount of messages to keep users in quarantine.
+  , selfDestroyEnabled :: Bool -- ^ Whether self-destructive messages enabled or not.
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data OwnerGroupSettings = OwnerGroupSettings
