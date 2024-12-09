@@ -44,6 +44,7 @@ data MenuId
   | ConsensusRoot
   | SpamCmdRoot
   | QuarantineRoot
+  | SelfDestroyRoot
   | Done
   -- multiple group
   | Multi ChatId
@@ -55,6 +56,8 @@ data MenuId
   | Quarantine Int
   -- Is Bot Admin
   | BotIsAdmin
+  -- Self destructive messages enabled
+  | SelfDestroy Bool
   deriving (Eq, Show, Read, Generic, FromDhall, ToDhall)
 
 selectNextMenu :: MenuId -> MenuId
@@ -63,6 +66,7 @@ selectNextMenu = \case
   SpamCmd _ -> MenuRoot
   Quarantine _ -> MenuRoot
   BotIsAdmin -> MenuRoot
+  SelfDestroy _ -> MenuRoot
   Done -> MenuRoot
   x -> x
 
@@ -71,6 +75,7 @@ setupMenu = \case
   Consensus  x -> x `elem` [ 2 .. 7 ]
   SpamCmd    _  -> True
   Quarantine x -> x `elem` [ 1 .. 5 ]
+  SelfDestroy _ -> True
   _            -> False
 
 alterSettings :: GroupSettings -> MenuId -> GroupSettings
@@ -78,6 +83,7 @@ alterSettings gs = \case
   Consensus new -> gs { usersForConsensus = fromIntegral new }
   SpamCmd new -> gs { spamCommandAction = new }
   Quarantine new -> gs { messagesInQuarantine = fromIntegral new }
+  SelfDestroy enabled -> gs { selfDestroyEnabled = enabled }
   _ -> gs
 
 

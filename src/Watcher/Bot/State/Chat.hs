@@ -98,6 +98,7 @@ renderChatState ChatState{..} = Text.unlines
   , "Action on `/spam` command: " <> spamCommandToText spamCommandAction
   , "Quarantine duration (in messages): " <> s2t messagesInQuarantine
   , "Is Bot Admin Already? " <> if botIsAdmin then "✔️" else "❌"
+  , "Send Self-destroyable messages: " <> if selfDestroyEnabled then "✔️" else "❌"
   ]
   where
     GroupSettings {..} = chatSettings

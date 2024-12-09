@@ -36,7 +36,7 @@ handleUnbanAction model@BotState{..} chatId ch adminId messageId someChatId = do
           userInfo = chatFullInfoToUserInfo c
           userId = userInfoId userInfo
       lookupCache blocklist userId >>= \case
-        Nothing -> selfDestructReply model chatId (ReplyUserHasNotBeenBanned userInfo)
+        Nothing -> selfDestructReply model chatId ch (ReplyUserHasNotBeenBanned userInfo)
         Just BanState{..} -> if HS.singleton chatId == bannedChats
           then do
             end <- liftIO getCurrentTime
@@ -50,7 +50,7 @@ handleUnbanAction model@BotState{..} chatId ch adminId messageId someChatId = do
             let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
             mUnbanResponse <- call model $ unbanChatMember unbanReq
             when ((responseResult <$> mUnbanResponse) == Just True) $ 
-              selfDestructReply model chatId (ReplyUserHasBeenUnbanned userInfo)
+              selfDestructReply model chatId ch (ReplyUserHasBeenUnbanned userInfo)
           else do
             end <- liftIO getCurrentTime
             let evt = (chatEvent end chatId EventGroupUnban)
@@ -63,4 +63,4 @@ handleUnbanAction model@BotState{..} chatId ch adminId messageId someChatId = do
             let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
             mUnbanResponse <- call model $ unbanChatMember unbanReq
             when ((fmap responseResult mUnbanResponse) == Just True) $ 
-              selfDestructReply model chatId (ReplyUserHasBeenUnbanned userInfo)
+              selfDestructReply model chatId ch (ReplyUserHasBeenUnbanned userInfo)
