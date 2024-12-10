@@ -24,13 +24,13 @@ messageSentFrom botSettings Message{..} =
       isGroup = ctype `elem` [ChatTypeGroup, ChatTypeSupergroup]
       isChannel = ctype == ChatTypeChannel
       cid = fromMaybe (chatId messageChat) messageMigrateToChatId
-      title = chatTitle messageChat
+      username = chatUsername messageChat
       withUser t = case userId <$> messageFrom of
         Nothing -> Unsupported cid
         Just uid -> t uid
   in if isOwner then OwnerGroup else
        if isChannel then Channel cid else
-         case (isGroup, isJust title) of
+         case (isGroup, isJust username) of
            (True, True) -> withUser (PublicGroup cid)
            (True, False) -> withUser (PrivateGroup cid)
            (False, _) -> withUser DirectMessage
