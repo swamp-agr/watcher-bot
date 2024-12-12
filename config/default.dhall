@@ -126,8 +126,8 @@ Extra commands:
         }
     , statistics =
         { workerName = "statistics"
-        , workerPeriod = WorkerPeriod.Day
-        , workerPeriodUnits = 21
+        , workerPeriod = WorkerPeriod.Hour
+        , workerPeriodUnits = 4
         }
     }
 }
