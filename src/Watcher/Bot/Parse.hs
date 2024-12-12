@@ -39,11 +39,15 @@ updateToAction settings@Settings{..} update
   -- callbacks
   | isCallback update = handleCallback settings =<< updateCallbackQuery update
 
+  -- chat member
+  | isChatMember update = handleChatMember settings =<< updateChatMember update
+
   -- regular messages and the rest stuff
   | otherwise = handleMessage settings update
   where
     isCallback = isJust . updateCallbackQuery
     isCommand cmd = isJust . parseUpdate (commandWithBotName botName cmd)
+    isChatMember = isJust . updateChatMember
 
   -- | Some user requested bot @/setup@. Let see what we can do about it:
 --
@@ -115,6 +119,20 @@ handleUnban settings Update{..}
         Channel groupId -> Just $ SendContactAndQuit groupId $ messageMessageId msg
         Unsupported groupId -> Just $ SendContactAndQuit groupId $ messageMessageId msg
   | otherwise = Nothing
+
+handleChatMember :: Settings -> ChatMemberUpdated -> Maybe Action
+handleChatMember settings cmu@ChatMemberUpdated {..} =
+  case chatMemberSentFrom settings cmu of
+    OwnerGroup -> Nothing
+    DirectMessage _userId -> Nothing
+    PublicGroup chatId userId ->
+      if chatMemberStatus chatMemberUpdatedNewChatMember == "banned"
+        && userIsBot chatMemberUpdatedFrom
+        then Just $! BotBanAction chatId userId chatMemberUpdatedNewChatMember
+        else Nothing
+    PrivateGroup _chatId _userId -> Nothing
+    Channel _groupId -> Nothing
+    Unsupported _chatId -> Nothing
 
 -- | @/contact@ could be expected only from DMs.
 handleContact :: Settings -> Update -> Maybe Action

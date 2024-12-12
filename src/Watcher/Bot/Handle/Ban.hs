@@ -317,3 +317,18 @@ voteButtons chatId spamerId =
    [ makeButton <$> [ ("Yes", VoteForBan chatId spamerId), ("No", VoteAgainstBan chatId spamerId) ] ]
   where
     makeButton = uncurry actionButton
+
+handleBotBanAction
+  :: BotState -> ChatId -> ChatState -> UserId -> ChatMember -> BotM ()
+handleBotBanAction model@BotState{..} chatId ChatState{..} botUserId bannedMember = do
+  let botIsAdmin' = botUserId `HS.member` chatAdmins
+      spamerId = userId $ chatMemberUser bannedMember
+      go = Just . fromMaybe newBanState
+
+  when botIsAdmin' $ do
+    now <- liftIO getCurrentTime
+    let evt = (chatEvent now chatId EventGroupSpam)
+          { eventData = Just "by_other_admin_bot" }
+    sendEvent model evt
+
+    alterCache blocklist spamerId go
