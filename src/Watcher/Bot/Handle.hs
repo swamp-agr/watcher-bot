@@ -61,6 +61,10 @@ handleAction (UnbanAction chatId adminId messageId someChatId) model = model <# 
   withCompletedSetup model chatId $ \ch ->
     handleUnbanAction model chatId ch adminId messageId someChatId
 
+handleAction (BotBanAction chatId botUserId bannedMember) model = model <# do
+  withCompletedSetup model chatId $ \ch ->
+    handleBotBanAction model chatId ch botUserId bannedMember
+
 handleAction (VoteBan userId messageId voteBanId) model = model <# do
   let chatId = voteBanIdToChatId voteBanId
   withCompletedSetup model chatId $ \ch ->

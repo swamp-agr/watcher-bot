@@ -16,16 +16,23 @@ data MessageFrom
   | Unsupported ChatId
 
 messageSentFrom :: Settings -> Message -> MessageFrom
-messageSentFrom botSettings Message{..} =
+messageSentFrom botSettings Message{..}
+  = sentFrom botSettings messageChat messageFrom
+
+chatMemberSentFrom :: Settings -> ChatMemberUpdated -> MessageFrom
+chatMemberSentFrom botSettings ChatMemberUpdated{..}
+  = sentFrom botSettings chatMemberUpdatedChat (Just chatMemberUpdatedFrom)
+
+sentFrom :: Settings -> Chat -> Maybe User -> MessageFrom
+sentFrom botSettings fromChat fromUser =
   let mOwnerId = fmap ownerGroupId . ownerGroup $ botSettings
-      isOwner = Just (coerce $ chatId messageChat) == mOwnerId
-      ctype = chatType messageChat
-      -- TODO/upstream: missing Eq instance
+      isOwner = Just (coerce $ chatId fromChat) == mOwnerId
+      ctype = chatType fromChat
       isGroup = ctype `elem` [ChatTypeGroup, ChatTypeSupergroup]
       isChannel = ctype == ChatTypeChannel
-      cid = fromMaybe (chatId messageChat) messageMigrateToChatId
-      username = chatUsername messageChat
-      withUser t = case userId <$> messageFrom of
+      cid = chatId fromChat
+      username = chatUsername fromChat
+      withUser t = case userId <$> fromUser of
         Nothing -> Unsupported cid
         Just uid -> t uid
   in if isOwner then OwnerGroup else
