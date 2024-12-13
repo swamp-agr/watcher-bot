@@ -86,7 +86,8 @@ renderAnswer = \case
 selfDestructReply :: BotState -> ChatId -> ChatState -> ReplyAnswerType -> BotM ()
 selfDestructReply model@BotState{..} chatId ChatState{..} answer = when selfDestroyEnabled $ do
   now <- liftIO getCurrentTime
-  let replyMsg = toReplyMessage (renderAnswer answer)
+  let replyMsg = (toReplyMessage (renderAnswer answer))
+        { replyMessageParseMode = Just HTML }
       req = replyMessageToSendMessageRequest (SomeChatId chatId) replyMsg
   mResponse <- call model $ sendMessage req
   forM_ mResponse $ \Response{..} -> when responseOk $ do
