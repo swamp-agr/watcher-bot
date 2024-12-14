@@ -126,7 +126,7 @@ handleChatMember settings cmu@ChatMemberUpdated {..} =
     OwnerGroup -> Nothing
     DirectMessage _userId -> Nothing
     PublicGroup chatId userId ->
-      if chatMemberStatus chatMemberUpdatedNewChatMember == "banned"
+      if chatMemberStatus chatMemberUpdatedNewChatMember `elem` ["banned", "kicked"]
         && userIsBot chatMemberUpdatedFrom
         then Just $! BotBanAction chatId userId chatMemberUpdatedNewChatMember
         else Nothing
