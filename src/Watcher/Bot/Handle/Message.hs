@@ -73,7 +73,7 @@ analyseMessage model chatId ch userId message = do
         banSpamerInChat model chatId spamer
         selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
-      forM_ (messageNewChatMembers message) $ addToQuarantine model chatId ch
+      forM_ (messageNewChatMembers message) $ addToQuarantineOrBan model chatId ch
       knownSpamMessage <- isKnownSpamMessage model messageInfo
       if knownSpamMessage
         then handleBanByRegularUser model chatId ch Nothing messageInfo
@@ -113,14 +113,26 @@ userIsInChatQuarantine :: ChatState -> UserId -> Maybe Int
 userIsInChatQuarantine ChatState{..} userId =
   HM.lookup userId quarantine >>= pure . Set.size . snd
 
-addToQuarantine :: BotState -> ChatId -> ChatState -> [User] -> BotM ()
-addToQuarantine model@BotState{..} chatId ch@ChatState{..} newcomers = do
+addToQuarantineOrBan :: BotState -> ChatId -> ChatState -> [User] -> BotM ()
+addToQuarantineOrBan model@BotState{..} chatId ch@ChatState{..} newcomers = do
   newcomersWithChats <- forM newcomers $ \newcomer -> do
-    let userChatId = SomeChatId $ coerce @_ @ChatId $ userId newcomer
-    mResponse <- call model $ getChat userChatId
-    pure ((toChatInfo . responseResult) <$> mResponse, newcomer)
+    let uid = userId newcomer
+    lookupCache blocklist uid >>= \case
+      Just bs@BanState{..} -> do
+        let nextBanState = bs { bannedChats = HS.insert chatId bannedChats }
+            spamer = userToUserInfo newcomer
+        writeCache blocklist uid nextBanState
+
+        banSpamerInChat model chatId spamer
+        selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
+
+        pure Nothing
+      Nothing -> do
+        let userChatId = SomeChatId $ coerce @_ @ChatId uid
+        mResponse <- call model $ getChat userChatId
+        pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
   let toQuarantineEntry (mChat, User{..}) = (userId, (mChat, Set.empty))
-      newUserMap = HM.fromList (toQuarantineEntry <$> newcomersWithChats)
+      newUserMap = HM.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
       go prev _new = prev -- current strategy: leave previous state, do not flush it
       nextState = ch { quarantine = HM.unionWith go quarantine newUserMap }
   writeCache groups chatId nextState
