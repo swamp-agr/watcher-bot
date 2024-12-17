@@ -109,7 +109,9 @@ handleUnban :: Settings -> Update -> Maybe Action
 handleUnban settings Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
-        OwnerGroup -> Nothing
+        OwnerGroup ->
+          messageText msg >>= tryParseSomeChatId
+          >>= pure . UnbanGlobally (messageMessageId msg)
         DirectMessage _userId -> Nothing
         PublicGroup groupId userId ->
           messageText msg >>= tryParseSomeChatId 

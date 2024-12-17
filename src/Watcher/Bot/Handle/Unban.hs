@@ -12,9 +12,11 @@ import Watcher.Bot.Analytics
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
 import Watcher.Bot.Reply
+import Watcher.Bot.Settings
 import Watcher.Bot.State
 import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
+import Watcher.Bot.Utils
 
 handleUnbanAction
   :: BotState
@@ -37,7 +39,7 @@ handleUnbanAction model@BotState{..} chatId ch adminId messageId someChatId = do
           userId = userInfoId userInfo
       lookupCache blocklist userId >>= \case
         Nothing -> selfDestructReply model chatId ch (ReplyUserHasNotBeenBanned userInfo)
-        Just BanState{..} -> if HS.singleton chatId == bannedChats
+        Just BanState{..} -> if bannedChats `elem` [HS.singleton chatId, HS.empty]
           then do
             end <- liftIO getCurrentTime
             let evt = (chatEvent end chatId EventGroupUnban)
@@ -64,3 +66,27 @@ handleUnbanAction model@BotState{..} chatId ch adminId messageId someChatId = do
             mUnbanResponse <- call model $ unbanChatMember unbanReq
             when ((fmap responseResult mUnbanResponse) == Just True) $ 
               selfDestructReply model chatId ch (ReplyUserHasBeenUnbanned userInfo)
+
+-- | This could be originated in owners group only.
+handleGlobalUnbanAction :: BotState -> MessageId -> SomeChatId -> BotM ()
+handleGlobalUnbanAction model@BotState{..} messageId someChatId = do
+  let Settings {..} = botSettings
+  forM_ ownerGroup $ \OwnerGroupSettings {..} -> do
+    let chatId = ChatId ownerGroupId
+    begin <- liftIO getCurrentTime
+    sendEvent model (chatEvent begin chatId EventGroupUnban)
+
+    void $ call model (deleteMessage chatId messageId)
+    mResponse <- call model (getChat someChatId)
+    forM_ mResponse $ \chatResponse -> do
+      let c = responseResult chatResponse
+          userInfo = chatFullInfoToUserInfo c
+          userId = userInfoId userInfo
+      lookupCache blocklist userId >>= \case
+        Nothing -> replyText $ "user not banned: " <> s2t userInfo
+        Just BanState {..} -> do
+          alterCache blocklist userId $! const Nothing
+
+          forM_ bannedChats $ \banChatId -> do
+            let unbanReq = defUnbanChatMember (SomeChatId banChatId) userId
+            void $ call model $ unbanChatMember unbanReq

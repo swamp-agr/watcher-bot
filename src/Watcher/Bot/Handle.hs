@@ -61,6 +61,9 @@ handleAction (UnbanAction chatId adminId messageId someChatId) model = model <# 
   withCompletedSetup model chatId $ \ch ->
     handleUnbanAction model chatId ch adminId messageId someChatId
 
+handleAction (UnbanGlobally messageId someChatId) model = model <# do
+  handleGlobalUnbanAction model messageId someChatId
+
 handleAction (BotBanAction chatId botUserId bannedMember) model = model <# do
   withCompletedSetup model chatId $ \ch ->
     handleBotBanAction model chatId ch botUserId bannedMember
