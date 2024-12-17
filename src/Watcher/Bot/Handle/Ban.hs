@@ -58,7 +58,7 @@ handleAdminBan model@BotState{..} chatId ch@ChatState{..} userId messageId admin
         case HM.lookup spamerId adminCalls  of
           Nothing -> pure ()
           Just (spamer, orig) -> do
-            updateBlocklistAndMessages model orig
+            updateBlocklistAndMessages model chatId orig
             banSpamerInChat model chatId spamer
             let nextState = ch { adminCalls = HM.delete spamerId adminCalls }
             writeCache groups chatId nextState
@@ -82,7 +82,7 @@ handleBanByAdmin model chatId orig@MessageInfo{..} = do
   sendEvent model evt
 
   let mSpamerUser = messageInfoFrom
-  updateBlocklistAndMessages model orig
+  updateBlocklistAndMessages model chatId orig
   -- according to telegram it should be empty only in channels
   forM_ mSpamerUser $! banSpamerInChat model chatId
 
@@ -135,7 +135,7 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere model (userInfoId spamer)
   if userAlreadyBanned
     then do
-      updateBlocklistAndMessages model orig
+      updateBlocklistAndMessages model chatId orig
       banSpamerInChat model chatId spamer
       selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
@@ -164,8 +164,8 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
 -- 1. remove it.
 -- 2. add them to list of spam messages.
 -- 3. add spamer to blocklist.
-updateBlocklistAndMessages :: BotState -> MessageInfo -> BotM ()
-updateBlocklistAndMessages model@BotState{..} MessageInfo{..} = do
+updateBlocklistAndMessages :: BotState -> ChatId -> MessageInfo -> BotM ()
+updateBlocklistAndMessages model@BotState{..} chatId MessageInfo{..} = do
   void $ call model $ deleteMessage (chatInfoId messageInfoChat) messageInfoId
   forM_ messageInfoText $ \txt' -> do
     let txt = MessageText txt'
@@ -174,9 +174,14 @@ updateBlocklistAndMessages model@BotState{..} MessageInfo{..} = do
       Nothing -> pure ()
       Just UserInfo{userInfoId} ->
         let
-          go Nothing = Just $! newBanState { bannedMessages = HS.singleton txt }
+          go Nothing = Just $! newBanState
+            { bannedMessages = HS.singleton txt
+            , bannedChats = HS.singleton chatId
+            }
           go (Just hs@BanState{..}) =
-            Just $! hs { bannedMessages = HS.insert txt bannedMessages }
+            Just $! hs { bannedMessages = HS.insert txt bannedMessages
+                       , bannedChats = HS.insert chatId bannedChats
+                       }
         in alterCache blocklist userInfoId go
 
 hasUserAlreadyBannedElsewhere :: BotState -> UserId -> BotM Bool
@@ -203,7 +208,7 @@ proceedWithPoll model ch@ChatState{..} chatId spamerId voterId mOrig (pollChange
     (False, False) ->
       updateBanPoll model ch chatId spamerId voters consensus poll
     (_, True)  -> do
-      forM_ mOrig $! updateBlocklistAndMessages model
+      forM_ mOrig $! updateBlocklistAndMessages model chatId
       unlessDebug model $! banSpamerInChat model chatId pollSpamer
       closeBanPoll model ch chatId spamerId
       void $ call model $ deleteMessage chatId pollSpamMessageId

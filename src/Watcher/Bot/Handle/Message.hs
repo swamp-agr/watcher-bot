@@ -69,7 +69,7 @@ analyseMessage model chatId ch userId message = do
     then unless (HS.member userId (allowlist ch)) $ do
       forM_ (messageFrom message) $ \spamerUser -> do
         let spamer = userToUserInfo spamerUser
-        updateBlocklistAndMessages model messageInfo
+        updateBlocklistAndMessages model chatId messageInfo
         banSpamerInChat model chatId spamer
         selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
