@@ -1,7 +1,7 @@
 module Watcher.Bot.Types.MessageFrom where
 
 import Data.Coerce (coerce)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Telegram.Bot.API
 
 import Watcher.Bot.Settings

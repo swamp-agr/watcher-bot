@@ -95,6 +95,7 @@ data Action
   -- ban/undo
   | BanAction ChatId UserId MessageId Message
   | UnbanAction ChatId UserId MessageId SomeChatId
+  | UnbanGlobally MessageId SomeChatId
   | BotBanAction ChatId UserId ChatMember
 
   -- contact
