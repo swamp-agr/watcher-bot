@@ -232,7 +232,7 @@ tryParseSomeChatId txt
 
 parseSomeChatId :: Text -> Maybe SomeChatId
 parseSomeChatId txt
-  = (SomeChatId <$> readMaybe @ChatId (Text.unpack txt)) <|> usernameMaybe txt
+  = ((SomeChatId . ChatId) <$> readMaybe @Integer (Text.unpack txt)) <|> usernameMaybe txt
   where
     usernameMaybe t = if Just '@' == (fst <$> Text.uncons t)
       then Just (SomeChatUsername t) else Nothing
