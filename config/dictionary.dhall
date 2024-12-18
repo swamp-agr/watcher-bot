@@ -60,4 +60,7 @@
 , { mapKey = "bitcoin", mapValue = 150 }
 , { mapKey = "btc", mapValue = 150 }
 , { mapKey = "bybit", mapValue = 400 }
+, { mapKey = "usd", mapValue = 300 }
+, { mapKey = "eur", mapValue = 300 }
+, { mapKey = "доллар", mapValue = 300 }
 ]
