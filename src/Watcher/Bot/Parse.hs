@@ -40,7 +40,7 @@ updateToAction settings@Settings{..} update
   | isCallback update = handleCallback settings =<< updateCallbackQuery update
 
   -- chat member
-  | isChatMember update = Just $! Debug update
+  | isChatMember update = handleChatMember settings =<< updateChatMember update
 
   -- regular messages and the rest stuff
   | otherwise = handleMessage settings update
