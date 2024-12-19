@@ -143,7 +143,11 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
       let spamerId = SpamerId $! userInfoId spamer
           mVoterIdOrBotId = mVoterId <|> ((VoterId . userInfoId) <$> botItself)
           mPollState = HM.lookup spamerId activePolls
-      unless (coerce spamerId `HS.member` chatAdmins) $ do
+
+          adminReported = coerce spamerId `HS.member` chatAdmins
+          selfReport = maybe False (coerce spamerId ==) mVoterId
+
+      unless (adminReported || selfReport) $ do
         mPoll <- case mPollState of
           Nothing -> createBanPoll
             model ch chatId spamerId mVoterIdOrBotId consensus spamer
