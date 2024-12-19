@@ -69,6 +69,7 @@ analyseMessage model chatId ch userId message = do
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
     then do
+      liftIO $ log' ("analyseMessage: already banned" :: Text, message)
       unless (HS.member userId (allowlist ch)) $ do
         forM_ (messageFrom message) $ \spamerUser -> do
           let spamer = userToUserInfo spamerUser
