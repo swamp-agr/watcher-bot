@@ -4,7 +4,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (forM, join)
 import Data.Coerce (coerce)
 import Data.Foldable (asum)
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Telegram.Bot.API
 import Telegram.Bot.Simple.UpdateParser
@@ -27,7 +27,8 @@ updateToAction settings@Settings{..} update
 
   --   owner's group
   | isCommand "tuning" update = handleTuning settings update
-  | isCommand "dump" update = handleDump settings update 
+  | isCommand "dump" update = handleDump settings update
+  | isCommand "getChatMember" update = handleGetChatMember settings update
 
   --   dm
   | isCommand "contact" update = handleContact settings update
@@ -78,6 +79,20 @@ handleTuning settings upd@Update{..}
         _ -> Nothing
 
   | otherwise = Nothing
+
+handleGetChatMember :: Settings -> Update -> Maybe Action
+handleGetChatMember settings upd@Update{..}
+  | Just msg <- asum [ updateMessage, updateEditedMessage ] =
+      case messageSentFrom settings msg of
+        OwnerGroup ->
+          let cmdAsList = Text.words $ fromMaybe "" $ messageText msg
+              textToInteger = readMaybe @Integer . Text.unpack
+              (mChatId, mUserId) = case cmdAsList of
+                _cmd : chatId : userId : _ ->
+                  (textToInteger chatId, textToInteger userId)
+                _ -> (Nothing, Nothing)
+          in GetChatMember <$> (ChatId <$> mChatId) <*> (UserId <$> mUserId)
+        _ -> Nothing
 
 -- | Some user requsted @/ban@. Let see what we can do about it:
 --

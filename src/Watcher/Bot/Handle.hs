@@ -32,6 +32,9 @@ handleAction (DebugCallback q) model = model <# do
 handleAction (Tuning update) model = model <# do
   handleTuning model update
 
+handleAction (GetChatMember chatId userId) model = model <# do
+  handleGetChatMember model chatId userId
+
 handleAction (Analyse chatId userId message) model = model <# do
   handleAnalyseMessage model chatId userId message
     
