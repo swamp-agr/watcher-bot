@@ -10,6 +10,7 @@ import Telegram.Bot.API
 import Telegram.Bot.Simple
 
 import qualified Data.HashSet as HS
+import qualified Data.Text as Text
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
@@ -103,3 +104,14 @@ debugGetChatAdmins BotState{clientEnv} msg = do
       then liftIO (log' @Text "Cannot retrieve admins")
       else do
         liftIO $ log' responseResult
+
+handleGetChatMember :: BotState -> ChatId -> UserId -> BotM ()
+handleGetChatMember model@BotState{..} chatId userId = do
+  let Settings {..} = botSettings
+  forM_ ownerGroup $ \OwnerGroupSettings {..} -> do
+    mResponse <- call model $ getChatMember (SomeChatId chatId) userId
+    let responseToText = Text.pack . show . responseResult
+        responseText = maybe "No response, check logs" responseToText mResponse
+        replyMsg = (toReplyMessage responseText)
+          { replyMessageParseMode = Just HTML }
+    reply replyMsg
