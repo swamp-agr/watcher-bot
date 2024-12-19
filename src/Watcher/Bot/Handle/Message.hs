@@ -62,18 +62,20 @@ handleTuning model@BotState{..} Update{..} = do
 
 analyseMessage :: BotState -> ChatId -> ChatState -> UserId -> Message -> BotM ()
 analyseMessage model chatId ch userId message = do
+  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan model chatId ch
+
   let messageInfo = messageToMessageInfo message
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere model userId
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
-    then unless (HS.member userId (allowlist ch)) $ do
-      forM_ (messageFrom message) $ \spamerUser -> do
-        let spamer = userToUserInfo spamerUser
-        updateBlocklistAndMessages model chatId messageInfo
-        banSpamerInChat model chatId spamer
-        selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
+    then do
+      unless (HS.member userId (allowlist ch)) $ do
+        forM_ (messageFrom message) $ \spamerUser -> do
+          let spamer = userToUserInfo spamerUser
+          updateBlocklistAndMessages model chatId messageInfo
+          banSpamerInChat model chatId spamer
+          selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
     else do
-      forM_ (messageNewChatMembers message) $ addToQuarantineOrBan model chatId ch
       knownSpamMessage <- isKnownSpamMessage model messageInfo
       if knownSpamMessage
         then handleBanByRegularUser model chatId ch Nothing messageInfo
@@ -127,14 +129,17 @@ addToQuarantineOrBan model@BotState{..} chatId ch@ChatState{..} newcomers = do
         selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
 
         pure Nothing
+
       Nothing -> do
         let userChatId = SomeChatId $ coerce @_ @ChatId uid
         mResponse <- call model $ getChat userChatId
         pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
+
   let toQuarantineEntry (mChat, User{..}) = (userId, (mChat, Set.empty))
       newUserMap = HM.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
       go prev _new = prev -- current strategy: leave previous state, do not flush it
       nextState = ch { quarantine = HM.unionWith go quarantine newUserMap }
+
   writeCache groups chatId nextState
 
 
