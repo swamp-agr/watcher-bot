@@ -2,7 +2,7 @@ module Watcher.Bot.Handle.Message where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM, forM_, unless, void)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
 import Data.Char (ord)
 import Data.Foldable (asum)
@@ -96,15 +96,13 @@ analyseMessage model chatId ch userId message = do
 incrementQuarantineCounter
   :: BotState -> ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
 incrementQuarantineCounter
-  BotState{..} chatId ch@ChatState{..} userId inQuarantine Message{..} = do
+  model@BotState{..} chatId ch@ChatState{..} userId inQuarantine Message{..} = do
   forM_ messageText $ \txt -> do
     let GroupSettings{..} = chatSettings
         enoughToRelease = inQuarantine + 1 == fromIntegral messagesInQuarantine
         hash = hexSha256 txt
     if enoughToRelease
-      then do
-        let nextState = ch { quarantine = HM.delete userId quarantine }
-        writeCache groups chatId nextState
+      then endQuarantineForUser model chatId userId
       else do
         let go Nothing = Just $! (Nothing, Set.singleton hash)
             go (Just (chat, s)) = Just $! (chat, Set.insert hash s)
@@ -114,6 +112,12 @@ incrementQuarantineCounter
 userIsInChatQuarantine :: ChatState -> UserId -> Maybe Int
 userIsInChatQuarantine ChatState{..} userId =
   HM.lookup userId quarantine >>= pure . Set.size . snd
+
+endQuarantineForUser :: MonadIO m => BotState -> ChatId -> UserId -> m ()
+endQuarantineForUser BotState{..} chatId userId = do
+  let go Nothing = Nothing
+      go (Just ch@ChatState{..}) = Just $! ch { quarantine = HM.delete userId quarantine }
+  alterCache groups chatId go
 
 addToQuarantineOrBan :: BotState -> ChatId -> ChatState -> [User] -> BotM ()
 addToQuarantineOrBan model@BotState{..} chatId ch@ChatState{..} newcomers = do

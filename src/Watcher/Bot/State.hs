@@ -3,7 +3,6 @@ module Watcher.Bot.State where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import Control.Concurrent.STM (TVar, newTVarIO)
-import Control.Exception.Safe (SomeException, try)
 import Control.Monad (when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.HashMap.Strict (HashMap)
@@ -16,7 +15,6 @@ import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
 import Servant.Client (ClientEnv, ClientM, runClientM)
 import Telegram.Bot.API
-import Telegram.Bot.Simple (BotM, liftClientM)
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -103,16 +101,8 @@ withLock BotState{clientEnv, requestLock} action = liftIO $ do
   putMVar requestLock ()
   pure mResult
 
-withDelay :: ClientM (Maybe a) -> BotM (Maybe a)
-withDelay action = do
-  result <- liftClientM $ try action >>= \case
-      Left (e' :: SomeException) -> liftIO $ log' e' >> pure Nothing
-      Right result -> pure $! result
-  liftIO (wait 1) -- FIXME: make configurable
-  pure result
-
-call :: Show a => BotState -> ClientM a -> BotM (Maybe a)
-call model action = withDelay $ withLock model action
+call :: (MonadIO m, Show a) => BotState -> ClientM a -> m (Maybe a)
+call model action = liftIO (callIO model action)
 
 callIO :: Show a => BotState -> ClientM a -> IO (Maybe a)
 callIO model action = do
