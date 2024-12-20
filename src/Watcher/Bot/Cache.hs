@@ -97,6 +97,9 @@ alterCache
 alterCache cache key modifier =
   liftIO $! atomically $! modifyTVar' cache $! HM.alter modifier key
 
+readCache
+  :: MonadIO m => TVar cache -> m cache
+readCache = liftIO . atomically . readTVar
 
 removeDirectoryIfExist :: FilePath -> IO ()
 removeDirectoryIfExist dir = do

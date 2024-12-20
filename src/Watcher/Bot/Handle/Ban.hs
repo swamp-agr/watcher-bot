@@ -3,7 +3,7 @@ module Watcher.Bot.Handle.Ban where
 import Control.Applicative ((<|>))
 import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_, void, when, unless)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
@@ -168,25 +168,28 @@ handleBanViaConsensusPoll model@BotState{..} chatId ch@ChatState{..} mVoterId sp
 -- 1. remove it.
 -- 2. add them to list of spam messages.
 -- 3. add spamer to blocklist.
-updateBlocklistAndMessages :: BotState -> ChatId -> MessageInfo -> BotM ()
+updateBlocklistAndMessages :: MonadIO m => BotState -> ChatId -> MessageInfo -> m ()
 updateBlocklistAndMessages model@BotState{..} chatId MessageInfo{..} = do
   void $ call model $ deleteMessage (chatInfoId messageInfoChat) messageInfoId
   forM_ messageInfoText $ \txt' -> do
     let txt = MessageText txt'
     alterCache spamMessages txt (Just . succ . fromMaybe 1)
     case messageInfoFrom of
-      Nothing -> pure ()
-      Just UserInfo{userInfoId} ->
-        let
-          go Nothing = Just $! newBanState
-            { bannedMessages = HS.singleton txt
-            , bannedChats = HS.singleton chatId
-            }
-          go (Just hs@BanState{..}) =
-            Just $! hs { bannedMessages = HS.insert txt bannedMessages
-                       , bannedChats = HS.insert chatId bannedChats
-                       }
-        in alterCache blocklist userInfoId go
+      Nothing -> pure () -- FIXME: there is a gap between spamers and messages
+      Just UserInfo{userInfoId} -> updateBlocklist model chatId userInfoId (Just txt)
+
+updateBlocklist :: MonadIO m => BotState -> ChatId -> UserId -> Maybe MessageText -> m ()
+updateBlocklist BotState {..} chatId userId mMessage =
+  let go Nothing = Just $! newBanState
+        { bannedMessages = maybe HS.empty HS.singleton mMessage
+        , bannedChats = HS.singleton chatId
+        }
+      go (Just hs@BanState{..}) =
+        Just $! hs
+          { bannedMessages = maybe bannedMessages (flip HS.insert bannedMessages) mMessage
+          , bannedChats = HS.insert chatId bannedChats
+          }
+  in alterCache blocklist userId go
 
 hasUserAlreadyBannedElsewhere :: BotState -> UserId -> BotM Bool
 hasUserAlreadyBannedElsewhere BotState{..} userId =

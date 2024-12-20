@@ -2,7 +2,8 @@ module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Monad (forever, join)
+import Control.Monad (forever, forM, forM_, join, when)
+import Data.IORef (readIORef, newIORef, modifyIORef')
 import Data.Text (Text)
 import GHC.Stack (HasCallStack)
 import Options.Applicative
@@ -15,17 +16,21 @@ import Telegram.Bot.API
 import Telegram.Bot.Simple
 import Telegram.Bot.Simple.BotApp.Internal 
 
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as Text
 import qualified Options.Applicative as OA
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle
+import Watcher.Bot.Handle.Ban
 import Watcher.Bot.Handle.Dump
+import Watcher.Bot.Handle.Message
 import Watcher.Bot.ModelChecker
 import Watcher.Bot.Parse
 import Watcher.Bot.Reply
 import Watcher.Bot.Settings
 import Watcher.Bot.State
+import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
 import Watcher.Bot.Utils
 import Watcher.Orphans ()
@@ -100,6 +105,48 @@ gatherStatistics model@BotState{..} = every statistics $ do
     Settings {..} = botSettings
     WorkersSettings {..} = workers
 
+autoban :: BotState -> IO ()
+autoban model@BotState{..} = do
+  let makeChatReport chatId ref = do
+        chatStats <- readIORef ref
+        let lineToText (status, count) = Text.concat [ "- ", status, ": ", s2t count ]
+            message = Text.concat
+              [ s2t chatId, ": \n"
+              , if HM.null chatStats
+                  then "(empty)"
+                  else Text.unlines (lineToText <$> HM.toList chatStats)
+              ]
+        pure message
+
+      replyMessages msg ref = do
+        count <- readIORef ref
+        let message = Text.concat
+              [ "Quarantine cleanup\n\nTotal: ", s2t count, " chats\n\n"
+              , Text.unlines msg
+              ]
+        replyStats model message
+
+  groupsMap <- readCache groups
+  chatCounter <- newIORef (0 :: Int)
+
+  messages <- forM (HM.toList groupsMap) $ \(chatId, ChatState{..}) -> do
+    chatMemberStats <- newIORef (HM.empty @Text @Int)
+    forM_ (HM.keys quarantine) $ \userId -> do
+      mResponse <- callIO model $ getChatMember (SomeChatId chatId) userId
+
+      let status = maybe "unknown" (chatMemberStatus . responseResult) mResponse :: Text
+          go Nothing = Just 1
+          go (Just v) = Just $! v + 1
+      modifyIORef' chatMemberStats (HM.alter go status)
+
+      when (status == "kicked") $ do
+        updateBlocklist model chatId userId Nothing
+        endQuarantineForUser model chatId userId
+
+    modifyIORef' chatCounter (+ 1)
+    makeChatReport chatId chatMemberStats
+  replyMessages messages chatCounter
+
 -- | Initiate Telegram Env, 'Model', start Bot, start backends concurrently.
 runTelegramBot :: Model -> IO ()
 runTelegramBot st@BotState{..} = do
@@ -109,7 +156,8 @@ runTelegramBot st@BotState{..} = do
     Concurrently (cleanAllCaches st) <*
     Concurrently (dumpAllCaches st) <*
     Concurrently (getSelf st) <*
-    Concurrently (gatherStatistics st)
+    Concurrently (gatherStatistics st) <*
+    Concurrently (autoban st)
 
 -- | Copy from 'Telegram.Bot.Simple.BotApp'.
 startBotEnv :: BotApp model action -> ClientEnv -> IO (BotEnv model action)
