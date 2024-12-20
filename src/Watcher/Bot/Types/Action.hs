@@ -122,7 +122,7 @@ data Action
   -- Message
   | Analyse ChatId UserId Message
   | Tuning Update
-  | GetChatMember ChatId UserId
+  | GetChatMember ChatId 
 
   -- Dump
   | Dump Message
