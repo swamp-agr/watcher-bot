@@ -8,6 +8,7 @@ import Data.Text (Text)
 import Data.Time (getCurrentTime)
 import Servant.Client (runClientM)
 import Telegram.Bot.API
+import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
 import qualified Data.HashMap.Strict as HM
@@ -118,7 +119,11 @@ handleGetChatMember model@BotState{..} chatId = do
         xs -> do
           texts <- forM xs $ \(userId, (_mChatInfo, messageHashes)) -> do
             mResponse <- call model $ getChatMember (SomeChatId chatId) userId
-            let responseToText = chatMemberStatus . responseResult
+            let responseToText x =
+                  let cm = responseResult x
+                      status = chatMemberStatus cm
+                      user = makeUserLink $ chatMemberUser cm
+                  in Text.concat [ user, ": ", status ]
                 responseText = maybe "No response, check logs" responseToText mResponse
                 userStatus = Text.concat
                   [ s2t (coerce @_ @Integer userId)
