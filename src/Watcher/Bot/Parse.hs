@@ -81,18 +81,18 @@ handleTuning settings upd@Update{..}
   | otherwise = Nothing
 
 handleGetChatMember :: Settings -> Update -> Maybe Action
-handleGetChatMember settings upd@Update{..}
+handleGetChatMember settings Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
         OwnerGroup ->
           let cmdAsList = Text.words $ fromMaybe "" $ messageText msg
               textToInteger = readMaybe @Integer . Text.unpack
-              (mChatId, mUserId) = case cmdAsList of
-                _cmd : chatId : userId : _ ->
-                  (textToInteger chatId, textToInteger userId)
-                _ -> (Nothing, Nothing)
-          in GetChatMember <$> (ChatId <$> mChatId) <*> (UserId <$> mUserId)
+              mChatId = case cmdAsList of
+                _cmd : chatId : _ -> textToInteger chatId
+                _ -> Nothing
+          in GetChatMember <$> (ChatId <$> mChatId)
         _ -> Nothing
+  | otherwise = Nothing
 
 -- | Some user requsted @/ban@. Let see what we can do about it:
 --

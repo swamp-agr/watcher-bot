@@ -1,7 +1,8 @@
 module Watcher.Bot.Handle.Debug where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Coerce (coerce)
 import Data.Foldable (asum)
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
@@ -9,6 +10,7 @@ import Servant.Client (runClientM)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
 
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Text as Text
 
@@ -105,13 +107,27 @@ debugGetChatAdmins BotState{clientEnv} msg = do
       else do
         liftIO $ log' responseResult
 
-handleGetChatMember :: BotState -> ChatId -> UserId -> BotM ()
-handleGetChatMember model@BotState{..} chatId userId = do
+handleGetChatMember :: BotState -> ChatId -> BotM ()
+handleGetChatMember model@BotState{..} chatId = do
   let Settings {..} = botSettings
-  forM_ ownerGroup $ \OwnerGroupSettings {..} -> do
-    mResponse <- call model $ getChatMember (SomeChatId chatId) userId
-    let responseToText = Text.pack . show . responseResult
-        responseText = maybe "No response, check logs" responseToText mResponse
-        replyMsg = (toReplyMessage responseText)
-          { replyMessageParseMode = Just HTML }
-    reply replyMsg
+  forM_ ownerGroup $ \OwnerGroupSettings {} -> lookupCache groups chatId >>= \case
+    Nothing -> replyText "No data for requested chat"
+    Just ChatState{..} -> do
+      case HM.toList quarantine of
+        [] -> reply "No users in quarantine"
+        xs -> do
+          texts <- forM xs $ \(userId, (_mChatInfo, messageHashes)) -> do
+            mResponse <- call model $ getChatMember (SomeChatId chatId) userId
+            let responseToText = chatMemberStatus . responseResult
+                responseText = maybe "No response, check logs" responseToText mResponse
+                userStatus = Text.concat
+                  [ s2t (coerce @_ @Integer userId)
+                  , ": ", responseText
+                  , ", ", s2t (length messageHashes)
+                  ]
+            pure userStatus
+          let fullChatResponse = Text.concat
+                [ s2t chatId, ": ", Text.unlines texts ]
+              replyMsg = (toReplyMessage fullChatResponse)
+                { replyMessageParseMode = Just HTML }
+          reply replyMsg
