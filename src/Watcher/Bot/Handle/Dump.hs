@@ -18,4 +18,4 @@ dumpAllCachesOnce = do
   dumpCache now usersPath users
   dumpCache now blocklistPath blocklist
   dumpCache now spamMessagesPath spamMessages
-  dumpCache now selfDestructionSetPath selfDestructionSet
+  dumpCache now eventSetPath eventSet

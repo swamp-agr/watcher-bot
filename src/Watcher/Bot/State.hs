@@ -46,7 +46,7 @@ data BotState = BotState
   , users :: TVar (HashMap UserId UserState)
   , blocklist :: TVar (HashMap UserId BanState)
   , spamMessages :: TVar (HashMap MessageText Int)
-  , selfDestructionSet :: TVar (Set SelfDestructMessage)
+  , eventSet :: TVar (Set TriggeredEvent)
   }
 
 -- | Bot has its own state
@@ -60,7 +60,7 @@ newBotState settings = do
   blocklist <- newTVarIO HM.empty
   spamMessages <- newTVarIO HM.empty
   requestLock <- newMVar ()
-  selfDestructionSet <- newTVarIO Set.empty
+  eventSet <- newTVarIO Set.empty
   let adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji . scores
         $! settings
   self <- newTVarIO Nothing
@@ -81,7 +81,7 @@ importBotState settings@Settings {..} = do
   users <- importCache usersPath
   blocklist <- importCache blocklistPath
   spamMessages <- importCache spamMessagesPath
-  selfDestructionSet <- importCache selfDestructionSetPath
+  eventSet <- importCache eventSetPath
 
   pure $ BotState { botSettings = settings, .. }
 
@@ -138,6 +138,29 @@ data SelfDestructMessage = SelfDestructMessage
 
 instance Ord SelfDestructMessage where
   compare = comparing selfDestructMessageTime
+
+data UserChatMemberCheck = UserChatMemberCheck
+  { userChatMemberCheckChatId :: ChatId
+  , userChatMemberCheckUserId :: UserId
+  , userChatMemberCheckTime :: UTCTime
+  }
+  deriving (Eq, Show, Generic, FromDhall, ToDhall)
+
+instance Ord UserChatMemberCheck where
+  compare = comparing userChatMemberCheckTime
+
+data TriggeredEvent
+  = SelfDestructMessageEvent SelfDestructMessage
+  | UserChatMemberCheckEvent UserChatMemberCheck
+  deriving (Eq, Show, Generic, FromDhall, ToDhall)
+
+instance Ord TriggeredEvent where
+  compare = comparing triggeredEventTime
+
+triggeredEventTime :: TriggeredEvent -> UTCTime
+triggeredEventTime = \case
+  SelfDestructMessageEvent SelfDestructMessage{..} -> selfDestructMessageTime
+  UserChatMemberCheckEvent UserChatMemberCheck{..} -> userChatMemberCheckTime
 
 makeLogEnv :: IO LogEnv
 makeLogEnv = do

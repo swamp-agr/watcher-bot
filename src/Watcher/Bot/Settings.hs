@@ -60,7 +60,7 @@ data StorageSettings = StorageSettings
   , usersPath :: FilePath
   , blocklistPath :: FilePath
   , spamMessagesPath :: FilePath
-  , selfDestructionSetPath :: FilePath
+  , eventSetPath :: FilePath
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data AnalyticsSettings = AnalyticsSettings

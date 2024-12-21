@@ -1,13 +1,13 @@
 module Watcher.Bot.Reply where
 
-import Control.Concurrent.STM (atomically, modifyTVar', readTVar)
-import Control.Monad (forever, forM_, void, when)
+import Control.Concurrent.STM (atomically, modifyTVar')
+import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
 import Data.HashSet (HashSet)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Time (addUTCTime, diffUTCTime, getCurrentTime)
+import Data.Time (addUTCTime, getCurrentTime)
 import GHC.Stack (HasCallStack)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
@@ -93,12 +93,12 @@ selfDestructReply chatId ChatState{..} answer = when selfDestroyEnabled $ do
   mResponse <- call $ sendMessage req
   forM_ mResponse $ \Response{..} -> when responseOk $ do
     let msgId = messageMessageId responseResult
-        msg = SelfDestructMessage
+        msg = SelfDestructMessageEvent $! SelfDestructMessage
           { selfDestructMessageChatId = chatId
           , selfDestructMessageId = msgId
           , selfDestructMessageTime = addUTCTime 20 now -- FIXME: configurable
           }
-    liftIO $! atomically $! modifyTVar' selfDestructionSet $! Set.insert msg
+    liftIO $! atomically $! modifyTVar' eventSet $! Set.insert msg
   where
     GroupSettings{..} = chatSettings
 
@@ -293,22 +293,6 @@ replyDone :: WithBotState => HasCallStack => SetupMessageId -> BotM ()
 replyDone messageId = do
   let editMsg = (toEditMessage "Setup completed.")
   setupReply messageId editMsg
-
-selfDestructMessages :: WithBotState => (Action -> IO ()) -> IO ()
-selfDestructMessages fun = forever $! do
-  let BotState{..} = ?model
-  queue <- atomically $ readTVar selfDestructionSet
-  case Set.lookupMin queue of
-    Nothing -> wait 1
-    Just ad@SelfDestructMessage{..} -> do
-      atomically $! modifyTVar' selfDestructionSet $! Set.delete ad
-      now <- getCurrentTime
-      if selfDestructMessageTime < now
-        then fun (DeleteMessage selfDestructMessageChatId selfDestructMessageId)
-        else do
-          let sec = diffUTCTime selfDestructMessageTime now
-          wait $ round sec
-          fun (DeleteMessage selfDestructMessageChatId selfDestructMessageId)
 
 replyStats :: WithBotState => Text -> IO ()
 replyStats txt = do

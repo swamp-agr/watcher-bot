@@ -105,7 +105,7 @@ Extra commands:
     , usersPath = "users"
     , blocklistPath = "blocklist"
     , spamMessagesPath = "spam_messages"
-    , selfDestructionSetPath = "self_destruct_set"
+    , eventSetPath = "triggered_events"
     }
 , analytics =
     { analyticsDir = "./bigdata"
