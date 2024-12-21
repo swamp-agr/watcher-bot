@@ -21,7 +21,6 @@ import Watcher.Bot.Handle.Message
 import Watcher.Bot.Settings
 import Watcher.Bot.State
 import Watcher.Bot.State.Chat
-import Watcher.Bot.Utils
 
 data ExportedChat = ExportedChat
   { exportedChatId :: Integer
@@ -126,6 +125,8 @@ instance ToRecord ChatExportTuningEntry where
 
 processChatExport :: FilePath -> FilePath -> Maybe Int -> IO ()
 processChatExport inputFile outputFile mFromId = do
+  botState <- newBotState =<< loadDefaultSettings
+  let ?model = botState
   eitherDecodeFileStrict' inputFile >>= \case
     Left err -> log' err
     Right result -> tuneChatExport outputFile mFromId result

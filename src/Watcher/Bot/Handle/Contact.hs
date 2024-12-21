@@ -40,6 +40,7 @@ checkUserContact model@BotState{..} userId msg = do
 
 contactUser :: BotState -> Message -> BotM ()
 contactUser model origMsg = do
+  let ?model = model
   forM_ (messageReplyToMessage origMsg) $ \msg -> do
     let fromChatId = chatId $ messageChat origMsg
         tryExtractChatIdFromForward m = join $ forM (messageForwardOrigin m) $ \case
@@ -69,6 +70,7 @@ contactUser model origMsg = do
 
 collectFeedback :: BotState -> ChatId -> BotM ()
 collectFeedback model@BotState{..} chatId = do
+  let ?model = model
   mResponse <- call model (getChat $ SomeChatId chatId)
   forM_ mResponse $ \Response{..} -> when responseOk $ do
     let Settings{..} = botSettings

@@ -104,6 +104,7 @@ handleBanByRegularUser model chatId ch@ChatState{..} mVoterId orig = do
 handleBanViaAdminsCall
   :: BotState -> ChatId -> ChatState -> UserInfo -> MessageInfo -> BotM ()
 handleBanViaAdminsCall model@BotState{..} chatId ch@ChatState{..} spamer orig = do
+  let ?model = model
   let spamerId = SpamerId $! userInfoId spamer
       nextState = ch
         { adminCalls = HM.insert spamerId (spamer, orig) adminCalls }
@@ -111,13 +112,13 @@ handleBanViaAdminsCall model@BotState{..} chatId ch@ChatState{..} spamer orig = 
 
   (call model $ getChatAdministrators (SomeChatId chatId)) >>= \case
     Just Response{..} -> if not responseOk
-      then liftIO (log' @Text "Cannot retrieve admins for ban call")
+      then liftIO (logT "Cannot retrieve admins for ban call")
       else do
        let adminUsernames = makeUserLink . chatMemberUser <$> responseResult
        replyCallAdmins chatId spamerId adminUsernames orig
     -- Fallback option is enabled only for test purposes
     Nothing -> withDebug model $ (call model $ getChat (SomeChatId chatId)) >>= \case
-      Nothing -> liftIO $ log' @Text "Cannot retrieve neither admins nor user for ban call"
+      Nothing -> liftIO $ logT "Cannot retrieve neither admins nor user for ban call"
       Just Response{..} -> do
         let adminUsernames = [makeChatLink responseResult]
         replyCallAdmins chatId spamerId adminUsernames orig
@@ -231,6 +232,7 @@ handleVoteBan
   -> VoteBanId
   -> BotM ()
 handleVoteBan model chatId ch@ChatState{..} voterId _messageId voteBanId = do
+  let ?model = model
   liftIO $ log' @Text "handleVoteBan"
   let spamerId = voteBanIdToSpamerId voteBanId
       selfVote = coerce @SpamerId @UserId spamerId == coerce @VoterId @UserId voterId

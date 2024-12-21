@@ -96,6 +96,7 @@ library
     default-extensions: BlockArguments
                       , DeriveAnyClass
                       , DerivingStrategies
+                      , ImplicitParams
                       , LambdaCase
                       , OverloadedStrings
                       , RecordWildCards
@@ -115,6 +116,7 @@ library
                     , exceptions
                     , filepath
                     , hashable
+                    , katip
                     , mtl
                     , optparse-applicative
                     , pretty

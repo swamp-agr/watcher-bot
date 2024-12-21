@@ -13,7 +13,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
+import Katip
 import Servant.Client (ClientEnv, ClientM, runClientM)
+import System.IO (stdout)
 import Telegram.Bot.API
 
 import qualified Data.HashMap.Strict as HM
@@ -26,7 +28,6 @@ import Watcher.Bot.Settings
 import Watcher.Bot.State.Chat
 import Watcher.Bot.State.User
 import Watcher.Bot.Types
-import Watcher.Bot.Utils
 import Watcher.Orphans ()
 
 -- | Telegram Model.
@@ -38,6 +39,7 @@ data BotState = BotState
   , requestLock :: MVar ()
   , adultEmoji :: HashSet Char
   , self :: TVar (Maybe UserInfo)
+  , logEnv :: LogEnv
   -- caches
   , groups :: TVar (HashMap ChatId ChatState)
   , admins :: TVar (HashMap UserId (HashSet (ChatId, Maybe Text)))
@@ -50,6 +52,7 @@ data BotState = BotState
 -- | Bot has its own state
 newBotState :: Settings -> IO BotState
 newBotState settings = do
+  logEnv <- makeLogEnv
   admins <- newTVarIO HM.empty
   clientEnv <- defaultTelegramClientEnv (Token . botToken $ settings)
   groups <- newTVarIO HM.empty
@@ -71,6 +74,7 @@ importBotState settings@Settings {..} = do
   clientEnv <- defaultTelegramClientEnv (Token botToken)
   requestLock <- newMVar ()
   self <- newTVarIO Nothing
+  logEnv <- makeLogEnv
 
   admins <- importCache adminsPath
   groups <- importCache groupsPath
@@ -91,7 +95,8 @@ withDebug :: Monad m => BotState -> m () -> m ()
 withDebug model action = when (isDebugEnabled model) $! action
 
 withLock :: (Show a, MonadIO m) => BotState -> ClientM a -> m (Maybe a)
-withLock BotState{clientEnv, requestLock} action = liftIO $ do
+withLock model@BotState{clientEnv, requestLock} action = liftIO $ do
+  let ?model = model
   takeMVar requestLock
   eResult <- flip runClientM clientEnv action
   case eResult of
@@ -134,3 +139,26 @@ data SelfDestructMessage = SelfDestructMessage
 instance Ord SelfDestructMessage where
   compare = comparing selfDestructMessageTime
 
+makeLogEnv :: IO LogEnv
+makeLogEnv = do
+  handleScribe <- mkHandleScribe (ColorLog False) stdout (permitItem InfoS) V2
+  registerScribe "stdout" handleScribe defaultScribeSettings
+    =<< initLogEnv "Watcher" "production"
+
+log' :: (?model :: BotState) => Show a => a -> IO ()
+log' x = do
+  let BotState{logEnv} = ?model
+      item = ()
+      loc = Nothing
+      severity = InfoS
+  runKatipContextT logEnv item mempty $ do
+    logItem item mempty loc severity (showLS x)
+
+logT :: (?model :: BotState) => Text -> IO ()
+logT x = do
+  let BotState{logEnv} = ?model
+      item = ()
+      loc = Nothing
+      severity = InfoS
+  runKatipContextT logEnv item mempty $ do
+    logItem item mempty loc severity (ls x)
