@@ -85,18 +85,18 @@ importBotState settings@Settings {..} = do
 
   pure $ BotState { botSettings = settings, .. }
 
-isDebugEnabled :: BotState -> Bool
-isDebugEnabled = debugEnabled . botSettings
+isDebugEnabled :: WithBotState => Bool
+isDebugEnabled = let BotState{..} = ?model in debugEnabled botSettings
 
-unlessDebug :: Monad m => BotState -> m () -> m ()
-unlessDebug model action = unless (isDebugEnabled model) $! action
+unlessDebug :: (WithBotState, Monad m) => m () -> m ()
+unlessDebug action = unless isDebugEnabled $! action
 
-withDebug :: Monad m => BotState -> m () -> m ()
-withDebug model action = when (isDebugEnabled model) $! action
+withDebug :: (WithBotState, Monad m) => m () -> m ()
+withDebug action = when isDebugEnabled $! action
 
-withLock :: (Show a, MonadIO m) => BotState -> ClientM a -> m (Maybe a)
-withLock model@BotState{clientEnv, requestLock} action = liftIO $ do
-  let ?model = model
+withLock :: WithBotState => (Show a, MonadIO m) => ClientM a -> m (Maybe a)
+withLock action = liftIO $ do
+  let BotState{clientEnv, requestLock} = ?model
   takeMVar requestLock
   eResult <- flip runClientM clientEnv action
   case eResult of
@@ -106,12 +106,12 @@ withLock model@BotState{clientEnv, requestLock} action = liftIO $ do
   putMVar requestLock ()
   pure mResult
 
-call :: (MonadIO m, Show a) => BotState -> ClientM a -> m (Maybe a)
-call model action = liftIO (callIO model action)
+call :: WithBotState => (MonadIO m, Show a) => ClientM a -> m (Maybe a)
+call = liftIO . callIO
 
-callIO :: Show a => BotState -> ClientM a -> IO (Maybe a)
-callIO model action = do
-  response <- liftIO (withLock model action)
+callIO :: WithBotState => Show a => ClientM a -> IO (Maybe a)
+callIO action = do
+  response <- liftIO (withLock action)
   wait 1
   pure response
 
@@ -145,7 +145,9 @@ makeLogEnv = do
   registerScribe "stdout" handleScribe defaultScribeSettings
     =<< initLogEnv "Watcher" "production"
 
-log' :: (?model :: BotState) => Show a => a -> IO ()
+type WithBotState = (?model :: BotState)
+
+log' :: WithBotState => Show a => a -> IO ()
 log' x = do
   let BotState{logEnv} = ?model
       item = ()
@@ -154,7 +156,7 @@ log' x = do
   runKatipContextT logEnv item mempty $ do
     logItem item mempty loc severity (showLS x)
 
-logT :: (?model :: BotState) => Text -> IO ()
+logT :: WithBotState => Text -> IO ()
 logT x = do
   let BotState{logEnv} = ?model
       item = ()

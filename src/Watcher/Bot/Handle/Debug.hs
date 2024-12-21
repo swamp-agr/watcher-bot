@@ -25,30 +25,29 @@ import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
 import Watcher.Bot.Utils
 
-handleDebug :: BotState -> Update -> BotM ()
-handleDebug model upd@Update{..} = do
-  let ?model = model
+handleDebug :: WithBotState => Update -> BotM ()
+handleDebug upd@Update{..} = do
   liftIO (log' upd)
   let mMsg = asum [updateMessage, updateEditedMessage]
-  forM_ mMsg (debug model)
+  forM_ mMsg debug
   pure ()
 
-handleDebugCallback :: BotState -> CallbackQuery -> BotM ()
-handleDebugCallback model q = do
-  let ?model = model
+handleDebugCallback :: WithBotState => CallbackQuery -> BotM ()
+handleDebugCallback q = do
   liftIO (log' q)
   pure ()
 
-debug :: BotState -> Message -> BotM ()
-debug model msg@Message{messageText} = withDebug model $ case messageText of
-  Just "setup" -> debugSetup model msg
-  Just "spam" -> debugSpam model msg
-  Just "getChatAdministrators" -> debugGetChatAdmins model msg
+debug :: WithBotState => Message -> BotM ()
+debug msg@Message{messageText} = withDebug $ case messageText of
+  Just "setup" -> debugSetup msg
+  Just "spam" -> debugSpam msg
+  Just "getChatAdministrators" -> debugGetChatAdmins msg
   _ -> pure ()
 
-debugSetup :: BotState -> Message -> BotM ()
-debugSetup model@BotState{..} Message{..} = do
-  let mUserId = userId <$> messageFrom
+debugSetup :: WithBotState => Message -> BotM ()
+debugSetup Message{..} = do
+  let BotState {..} = ?model
+      mUserId = userId <$> messageFrom
       Chat{..} = messageChat
       readyOrNot = True
       group = (chatId, chatUsername)
@@ -58,12 +57,12 @@ debugSetup model@BotState{..} Message{..} = do
         go (Just v) = Just v
     alterCache groups chatId go
     writeCache admins userId' $! HS.singleton group
-  when readyOrNot $ forM_ mUserId $ \userId' -> setSingleRoot model userId' (fst group)
-  replySingleGroupRoot model readyOrNot (Just chatId) (ReplySetup messageMessageId)
+  when readyOrNot $ forM_ mUserId $ \userId' -> setSingleRoot userId' (fst group)
+  replySingleGroupRoot readyOrNot (Just chatId) (ReplySetup messageMessageId)
 
-debugSpam :: BotState -> Message -> BotM ()
-debugSpam model@BotState{..} msg = do
-  let ?model = model
+debugSpam :: WithBotState => Message -> BotM ()
+debugSpam msg = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
   liftIO $ logT "debugSpam"
   -- it *must* be reply to some other message
@@ -94,12 +93,12 @@ debugSpam model@BotState{..} msg = do
       writeCache groups chatId ch
       writeCache admins userId' $! HS.singleton group
 
-      handleBanAction model chatId ch (VoterId userId') mid $! messageToMessageInfo orig
+      handleBanAction chatId ch (VoterId userId') mid $! messageToMessageInfo orig
 
-debugGetChatAdmins :: BotState -> Message -> BotM ()
-debugGetChatAdmins model@BotState{clientEnv} msg = do
-  let ?model = model
-  let Chat{..} = messageChat msg
+debugGetChatAdmins :: WithBotState => Message -> BotM ()
+debugGetChatAdmins msg = do
+  let BotState{clientEnv} = ?model
+      Chat{..} = messageChat msg
   mResponse <- liftIO $ do
     eres <- flip runClientM clientEnv $ getChatAdministrators (SomeChatId chatId)
     log' eres
@@ -112,10 +111,10 @@ debugGetChatAdmins model@BotState{clientEnv} msg = do
       else do
         liftIO $ log' responseResult
 
-handleGetChatMember :: BotState -> ChatId -> BotM ()
-handleGetChatMember model@BotState{..} chatId = do
-  let ?model = model
-  let Settings {..} = botSettings
+handleGetChatMember :: WithBotState => ChatId -> BotM ()
+handleGetChatMember chatId = do
+  let BotState{..} = ?model
+      Settings {..} = botSettings
   forM_ ownerGroup $ \OwnerGroupSettings {} -> lookupCache groups chatId >>= \case
     Nothing -> replyText "No data for requested chat"
     Just ChatState{..} -> do
@@ -123,7 +122,7 @@ handleGetChatMember model@BotState{..} chatId = do
         [] -> reply "No users in quarantine"
         xs -> do
           texts <- forM xs $ \(userId, (_mChatInfo, messageHashes)) -> do
-            mResponse <- call model $ getChatMember (SomeChatId chatId) userId
+            mResponse <- call $ getChatMember (SomeChatId chatId) userId
             let responseToText x =
                   let cm = responseResult x
                       status = chatMemberStatus cm

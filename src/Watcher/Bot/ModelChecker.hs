@@ -131,15 +131,15 @@ processChatExport inputFile outputFile mFromId = do
     Left err -> log' err
     Right result -> tuneChatExport outputFile mFromId result
 
-tuneChatExport :: FilePath -> Maybe Int -> ExportedChat -> IO ()
+tuneChatExport :: WithBotState => FilePath -> Maybe Int -> ExportedChat -> IO ()
 tuneChatExport file mFromId ExportedChat{..} = do
+  let BotState {..} = ?model
   when (isNothing mFromId) $ refreshFile file
   let fromMessageId msgId = dropWhile ((<= msgId) . getExportedMessageId) exportedChatMessages
       chatMessages = maybe exportedChatMessages (fromMessageId . fromIntegral) mFromId
   forM_ chatMessages $ \case
     ExportedService {} -> pure ()
     ExportedMessage {..} -> forM_ exportedMessageFromId $ \userId -> do
-      botState@BotState{..} <- newBotState =<< loadDefaultSettings
       let user = User
             { userId = UserId userId
             , userIsBot = False
@@ -250,7 +250,7 @@ tuneChatExport file mFromId ExportedChat{..} = do
             , messageReplyMarkup = Nothing
             }
           ch = newChatState botSettings
-          decision = decideAboutMessage botState ch user message
+          decision = decideAboutMessage ch user message
           txt = Text.unwords $ catMaybes $ fmap exportTextEntityText $ fromMaybe [] exportedMessageTextEntities 
           entry = ChatExportTuningEntry
             { chatExportTuningEntryChatId = exportedChatId

@@ -21,8 +21,9 @@ import Watcher.Bot.State
 import Watcher.Bot.State.User
 import Watcher.Bot.Utils
 
-checkUserContact :: BotState -> UserId -> Message -> BotM ()
-checkUserContact model@BotState{..} userId msg = do
+checkUserContact :: WithBotState => UserId -> Message -> BotM ()
+checkUserContact userId msg = do
+  let BotState {..} = ?model
   lookupCache users userId >>= \case
     Nothing -> do
       alterCache users userId (const $ Just newUserState)
@@ -31,16 +32,15 @@ checkUserContact model@BotState{..} userId msg = do
         now <- liftIO getCurrentTime
         let evt = (userEvent now userId EventUserPrivateCommand)
               { eventData = listToMaybe (Text.words txt) }
-        sendEvent model evt
+        sendEvent evt
     Just UserState{..} -> when (userCurrentState == Just UserCurrentContact) $ do
       let userChatId = coerce @UserId @ChatId userId
-      forwardToOwnersMaybe model Feedback userChatId $ messageMessageId msg
+      forwardToOwnersMaybe  Feedback userChatId $ messageMessageId msg
       alterCache users userId (maybe (Just newUserState) (Just . completeContact))
       replyText "Your message has been sent. We'll come back to you."
 
-contactUser :: BotState -> Message -> BotM ()
-contactUser model origMsg = do
-  let ?model = model
+contactUser :: WithBotState => Message -> BotM ()
+contactUser origMsg = do
   forM_ (messageReplyToMessage origMsg) $ \msg -> do
     let fromChatId = chatId $ messageChat origMsg
         tryExtractChatIdFromForward m = join $ forM (messageForwardOrigin m) $ \case
@@ -66,12 +66,12 @@ contactUser model origMsg = do
         let copyMessageReq =
               defCopyMessage
                 (SomeChatId chatId) (SomeChatId fromChatId) (messageMessageId origMsg)
-        void $ call model $ copyMessage copyMessageReq
+        void $ call $ copyMessage copyMessageReq
 
-collectFeedback :: BotState -> ChatId -> BotM ()
-collectFeedback model@BotState{..} chatId = do
-  let ?model = model
-  mResponse <- call model (getChat $ SomeChatId chatId)
+collectFeedback :: WithBotState => ChatId -> BotM ()
+collectFeedback chatId = do
+  let BotState {..} = ?model
+  mResponse <- call (getChat $ SomeChatId chatId)
   forM_ mResponse $ \Response{..} -> when responseOk $ do
     let Settings{..} = botSettings
         ChatFullInfo{..} = responseResult
@@ -81,24 +81,25 @@ collectFeedback model@BotState{..} chatId = do
           , "username: ", maybe "" (Text.cons '@') chatFullInfoUsername
           , "type: ", s2t chatFullInfoType
           ]
-    liftIO $ log' (Text.unpack msg)
+    liftIO $ logT msg
     forM_ ownerGroup $ \OwnerGroupSettings{..} -> do
       let sendMessageRequest = (defSendMessage (SomeChatId $ ChatId ownerGroupId) msg)
             { sendMessageMessageThreadId = Just $ MessageThreadId ownerGroupFeedbackThreadId
             }
-      void $ call model (sendMessage sendMessageRequest)
+      void $ call (sendMessage sendMessageRequest)
       pure ()
   pure ()
 
-contactOwners :: BotState -> UserId -> Message -> BotM ()
-contactOwners model@BotState{..} userId message = do
+contactOwners :: WithBotState => UserId -> Message -> BotM ()
+contactOwners userId message = do
+  let BotState {..} = ?model
   let chatId = coerce @UserId @ChatId userId
-  collectFeedback model chatId
+  collectFeedback chatId
   let txt = Text.drop 1 . Text.dropWhile (not . isSpace) . fromMaybe "" . messageText
         $ message
   if not (Text.null txt)
     then do
-      forwardToOwnersMaybe model Feedback chatId $ messageMessageId message
+      forwardToOwnersMaybe Feedback chatId $ messageMessageId message
       alterCache users userId (maybe (Just newUserState) (Just . completeContact))
       replyText "Your message has been sent. We'll come back to you."
     else do
@@ -110,8 +111,9 @@ contactOwners model@BotState{..} userId message = do
 data ForwardMessageType = Feedback | Spam
   deriving (Eq, Show)
 
-forwardToOwnersMaybe :: BotState -> ForwardMessageType -> ChatId -> MessageId -> BotM ()
-forwardToOwnersMaybe model@BotState{..} fwdType chatId messageId = do
+forwardToOwnersMaybe :: WithBotState => ForwardMessageType -> ChatId -> MessageId -> BotM ()
+forwardToOwnersMaybe fwdType chatId messageId = do
+  let BotState {..} = ?model
   let Settings{..} = botSettings
   forM_ ownerGroup $ \OwnerGroupSettings{..} -> do
     let ownerId = SomeChatId $ ChatId ownerGroupId
@@ -121,23 +123,23 @@ forwardToOwnersMaybe model@BotState{..} fwdType chatId messageId = do
         forwardMessageRequest =
           (defForwardMessage ownerId (SomeChatId chatId) messageId)
             { forwardMessageMessageThreadId = Just $ MessageThreadId threadId }
-    mResponse <- call model (forwardMessage forwardMessageRequest)
+    mResponse <- call (forwardMessage forwardMessageRequest)
     let fwdSent = maybe False responseOk mResponse
     unless fwdSent $ do
       let copyMessageRequest =
             (defCopyMessage ownerId (SomeChatId chatId) messageId)
               { copyMessageMessageThreadId =  Just $ MessageThreadId threadId }
-      void $ call model $ copyMessage copyMessageRequest
+      void $ call $ copyMessage copyMessageRequest
     pure ()          
 
-sendContactMessageAndLeave :: BotState -> ChatId -> MessageId -> BotM ()
-sendContactMessageAndLeave model chatId messageId = do
+sendContactMessageAndLeave :: WithBotState => ChatId -> MessageId -> BotM ()
+sendContactMessageAndLeave chatId messageId = do
   now <- liftIO getCurrentTime
-  sendEvent model $ (event now EventLeaveUnsupported)
+  sendEvent $ (event now EventLeaveUnsupported)
     { eventChatId = Just chatId }
 
   sendUnsupportedMessage messageId
-  collectFeedback model chatId
-  forwardToOwnersMaybe model Feedback chatId messageId
-  void $ call model $ leaveChat (SomeChatId chatId)
+  collectFeedback chatId
+  forwardToOwnersMaybe Feedback chatId messageId
+  void $ call $ leaveChat (SomeChatId chatId)
   pure ()

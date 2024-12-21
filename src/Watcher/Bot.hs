@@ -36,9 +36,9 @@ import Watcher.Bot.Utils
 import Watcher.Orphans ()
 
 -- | Initiate bot app based on a 'Model'.
-watcherBot :: Model -> BotApp Model Action
-watcherBot st = BotApp
-  { botInitialModel = st
+watcherBot :: WithBotState => BotApp Model Action
+watcherBot = BotApp
+  { botInitialModel = ?model
   , botAction = actionParser
   , botHandler = handleAction
   , botJobs = []
@@ -46,13 +46,14 @@ watcherBot st = BotApp
   where
     actionParser update BotState{..} = updateToAction botSettings update
 
+
 dumpAllCaches :: BotState -> IO ()
 dumpAllCaches model@BotState{..} = do
   let ?model = model
   let Settings {..} = botSettings
       WorkersSettings {..} = workers
 
-  every dump $ dumpAllCachesOnce model
+  every dump dumpAllCachesOnce
 
 cleanAllCaches :: BotState -> IO ()
 cleanAllCaches model@BotState{..} = do
@@ -64,7 +65,7 @@ cleanAllCaches model@BotState{..} = do
   every cleanup $ mapM_ cleanCache
     [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, selfDestructionSetPath ]
 
-every :: (?model :: BotState) => HasCallStack => WorkerSettings -> IO () -> IO ()
+every :: WithBotState => HasCallStack => WorkerSettings -> IO () -> IO ()
 every WorkerSettings{..} action = do
   logT $ "Start worker: " <> workerName
   forever $ do
@@ -72,9 +73,10 @@ every WorkerSettings{..} action = do
     action
     wait (fromIntegral workerPeriodUnits * workerPeriodToSec workerPeriod)
 
-getSelf :: BotState -> IO ()
-getSelf model@BotState{..} = do
-  mResponse <- callIO model getMe
+getSelf :: WithBotState => IO ()
+getSelf = do
+  let BotState {..} = ?model
+  mResponse <- callIO getMe
   let botItself = maybe (error "getMe failed") (userToUserInfo . responseResult) mResponse
   atomically $ modifyTVar' self (const $ Just botItself)
 
@@ -85,15 +87,15 @@ gatherCacheStats title cache = do
   pure $ Text.concat
     [ title, ": ", s2t cacheSize]
 
-gatherStatistics :: (?model :: BotState) => BotState -> IO ()
-gatherStatistics model@BotState{..} = every statistics $ do
+gatherStatistics :: WithBotState => IO ()
+gatherStatistics = every statistics $ do
   groupsStats <- gatherCacheStats "Groups" groups
   adminsStats <- gatherCacheStats "Admins" admins
   usersStats <- gatherCacheStats "Users" users
   blocklistStats <- gatherCacheStats "Blocklist" blocklist
   spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages
   selfDestructionSetStats <- gatherCacheStats "Self-destruct message queue" selfDestructionSet
-  replyStats model $ Text.unlines
+  replyStats $ Text.unlines
     [ "Statistics"
     , ""
     , groupsStats
@@ -104,11 +106,13 @@ gatherStatistics model@BotState{..} = every statistics $ do
     , selfDestructionSetStats
     ]
   where
+    BotState{..} = ?model
     Settings {..} = botSettings
     WorkersSettings {..} = workers
 
-autoban :: BotState -> IO ()
-autoban model@BotState{..} = do
+autoban :: WithBotState => IO ()
+autoban = do
+  let BotState {..} = ?model
   let makeChatReport chatId ref = do
         chatStats <- readIORef ref
         let lineToText (status, count) = Text.concat [ "- ", status, ": ", s2t count ]
@@ -126,7 +130,7 @@ autoban model@BotState{..} = do
               [ "Quarantine cleanup\n\nTotal: ", s2t count, " chats\n\n"
               , Text.unlines msg
               ]
-        replyStats model message
+        replyStats message
 
   groupsMap <- readCache groups
   chatCounter <- newIORef (0 :: Int)
@@ -134,7 +138,7 @@ autoban model@BotState{..} = do
   messages <- forM (HM.toList groupsMap) $ \(chatId, ChatState{..}) -> do
     chatMemberStats <- newIORef (HM.empty @Text @Int)
     forM_ (HM.keys quarantine) $ \userId -> do
-      mResponse <- callIO model $ getChatMember (SomeChatId chatId) userId
+      mResponse <- call $ getChatMember (SomeChatId chatId) userId
 
       let status = maybe "unknown" (chatMemberStatus . responseResult) mResponse :: Text
           go Nothing = Just 1
@@ -142,8 +146,8 @@ autoban model@BotState{..} = do
       modifyIORef' chatMemberStats (HM.alter go status)
 
       when (status == "kicked") $ do
-        updateBlocklist model chatId userId Nothing
-        endQuarantineForUser model chatId userId
+        updateBlocklist chatId userId Nothing
+        endQuarantineForUser chatId userId
 
     modifyIORef' chatCounter (+ 1)
     makeChatReport chatId chatMemberStats
@@ -153,14 +157,14 @@ autoban model@BotState{..} = do
 runTelegramBot :: Model -> IO ()
 runTelegramBot st@BotState{..} = do
   let ?model = st
-  botActionFun <- startBotAsync (watcherBot st) clientEnv
+  botActionFun <- startBotAsync watcherBot clientEnv
   runConcurrently $
-    Concurrently (selfDestructMessages st botActionFun) <*
+    Concurrently (selfDestructMessages botActionFun) <*
     Concurrently (cleanAllCaches st) <*
     Concurrently (dumpAllCaches st) <*
-    Concurrently (getSelf st) <*
-    Concurrently (gatherStatistics st) <*
-    Concurrently (autoban st)
+    Concurrently getSelf <*
+    Concurrently gatherStatistics <*
+    Concurrently autoban
 
 -- | Copy from 'Telegram.Bot.Simple.BotApp'.
 startBotEnv :: BotApp model action -> ClientEnv -> IO (BotEnv model action)
