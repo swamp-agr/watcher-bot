@@ -300,7 +300,7 @@ createBanPoll st chatId spamerId mVoterId consensus spamer messageId = do
         let pollId = messageMessageId responseResult
             (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId messageId
         writeCache groups chatId nextChatState
-        pure $ Just (True, poll)
+        pure $ Just (False, poll)
 
 updateBanPoll
   :: WithBotState
