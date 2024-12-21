@@ -32,78 +32,78 @@ import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
 import Watcher.Bot.Utils
 
-handleAnalyseMessage :: BotState -> ChatId -> UserId -> Message -> BotM ()
-handleAnalyseMessage model@BotState{..} chatId userId message = do
+handleAnalyseMessage :: WithBotState => ChatId -> UserId -> Message -> BotM ()
+handleAnalyseMessage chatId userId message = do
+  let BotState {..} = ?model
   mChatState <- lookupCache groups chatId
   forM_ mChatState $ \ch@ChatState{..} -> case chatSetup of
     SetupNone -> pure ()
     SetupInProgress {} -> pure ()
-    SetupCompleted {} -> analyseMessage model chatId ch userId message
+    SetupCompleted {} -> analyseMessage chatId ch userId message
 
-handleTuning :: BotState -> Update -> BotM ()
-handleTuning model@BotState{..} Update{..} = do
-  let ?model = model
-  let mMsg = asum [ updateMessage, updateEditedMessage ]
+handleTuning :: WithBotState => Update -> BotM ()
+handleTuning Update{..} = do
+  let BotState {..} = ?model
+      mMsg = asum [ updateMessage, updateEditedMessage ]
   forM_ mMsg $ \origMsg -> do
-    void $ call model
-      $ deleteMessage (chatId $ messageChat origMsg) (messageMessageId origMsg)
+    void $ call $ deleteMessage (chatId $ messageChat origMsg) (messageMessageId origMsg)
     forM_ (messageReplyToMessage origMsg) $ \msg ->
       forM_ (messageForwardOrigin msg) $ \origin -> case origin of
         MessageOriginUser{messageOriginUserSenderUser} -> do
           let userId' = userId messageOriginUserSenderUser
               userChatId = coerce @_ @ChatId userId'
-          mResponse <- call model $ getChat (SomeChatId userChatId)
+          mResponse <- call $ getChat (SomeChatId userChatId)
           liftIO $ log' ("ChatFullInfo" :: Text, mResponse)
           let mChat = responseResult <$> mResponse
               ch = (newChatState botSettings)
                 { quarantine = HM.singleton userId' (toChatInfo <$> mChat, Set.empty) }
-              decision = decideAboutMessage model ch messageOriginUserSenderUser msg
+              decision = decideAboutMessage ch messageOriginUserSenderUser msg
           replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
         _ -> pure ()
 
-analyseMessage :: BotState -> ChatId -> ChatState -> UserId -> Message -> BotM ()
-analyseMessage model chatId ch userId message = do
-  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan model chatId ch
+analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> BotM ()
+analyseMessage chatId ch userId message = do
+  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan chatId ch
 
   let messageInfo = messageToMessageInfo message
-  userAlreadyBanned <- hasUserAlreadyBannedElsewhere model userId
+  userAlreadyBanned <- hasUserAlreadyBannedElsewhere userId
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
     then do
       unless (HS.member userId (allowlist ch)) $ do
         forM_ (messageFrom message) $ \spamerUser -> do
           let spamer = userToUserInfo spamerUser
-          updateBlocklistAndMessages model chatId messageInfo
-          banSpamerInChat model chatId spamer
-          selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
+          updateBlocklistAndMessages chatId messageInfo
+          banSpamerInChat chatId spamer
+          selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
     else do
-      knownSpamMessage <- isKnownSpamMessage model messageInfo
+      knownSpamMessage <- isKnownSpamMessage messageInfo
       if knownSpamMessage
-        then handleBanByRegularUser model chatId ch Nothing messageInfo
+        then handleBanByRegularUser chatId ch Nothing messageInfo
         else case userIsInChatQuarantine ch userId of
           Nothing -> pure ()
           Just inQuarantine -> forM_ (messageFrom message) $ \user -> do
             now <- liftIO getCurrentTime
-            case decideAboutMessage model ch user message of
-              RegularMessage _ -> incrementQuarantineCounter
-                model chatId ch userId inQuarantine message
+            case decideAboutMessage ch user message of
+              RegularMessage _ ->
+                incrementQuarantineCounter chatId ch userId inQuarantine message
               ProbablySpamMessage _ ->
-                sendEvent model (chatEvent now chatId EventGroupRecogniseProbablySpam)
+                sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
               MostLikelySpamMessage _ -> do
-                sendEvent model (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
-                forwardToOwnersMaybe model Spam chatId (messageInfoId messageInfo)
-                handleBanByRegularUser model chatId ch Nothing messageInfo
+                sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+                forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
+                handleBanByRegularUser chatId ch Nothing messageInfo
 
 incrementQuarantineCounter
-  :: BotState -> ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
-incrementQuarantineCounter
-  model@BotState{..} chatId ch@ChatState{..} userId inQuarantine Message{..} = do
+  :: WithBotState => ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
+incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{..} = do
+  let BotState {..} = ?model
   forM_ messageText $ \txt -> do
     let GroupSettings{..} = chatSettings
         enoughToRelease = inQuarantine + 1 == fromIntegral messagesInQuarantine
         hash = hexSha256 txt
     if enoughToRelease
-      then endQuarantineForUser model chatId userId
+      then endQuarantineForUser chatId userId
       else do
         let go Nothing = Just $! (Nothing, Set.singleton hash)
             go (Just (chat, s)) = Just $! (chat, Set.insert hash s)
@@ -114,14 +114,16 @@ userIsInChatQuarantine :: ChatState -> UserId -> Maybe Int
 userIsInChatQuarantine ChatState{..} userId =
   HM.lookup userId quarantine >>= pure . Set.size . snd
 
-endQuarantineForUser :: MonadIO m => BotState -> ChatId -> UserId -> m ()
-endQuarantineForUser BotState{..} chatId userId = do
-  let go Nothing = Nothing
+endQuarantineForUser :: (WithBotState, MonadIO m) => ChatId -> UserId -> m ()
+endQuarantineForUser chatId userId = do
+  let BotState {..} = ?model
+      go Nothing = Nothing
       go (Just ch@ChatState{..}) = Just $! ch { quarantine = HM.delete userId quarantine }
   alterCache groups chatId go
 
-addToQuarantineOrBan :: BotState -> ChatId -> ChatState -> [User] -> BotM ()
-addToQuarantineOrBan model@BotState{..} chatId ch@ChatState{..} newcomers = do
+addToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> [User] -> BotM ()
+addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
+  let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
     let uid = userId newcomer
     lookupCache blocklist uid >>= \case
@@ -130,14 +132,14 @@ addToQuarantineOrBan model@BotState{..} chatId ch@ChatState{..} newcomers = do
             spamer = userToUserInfo newcomer
         writeCache blocklist uid nextBanState
 
-        banSpamerInChat model chatId spamer
-        selfDestructReply model chatId ch (ReplyUserAlreadyBanned spamer)
+        banSpamerInChat chatId spamer
+        selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
 
         pure Nothing
 
       Nothing -> do
         let userChatId = SomeChatId $ coerce @_ @ChatId uid
-        mResponse <- call model $ getChat userChatId
+        mResponse <- call $ getChat userChatId
         pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
   let toQuarantineEntry (mChat, User{..}) = (userId, (mChat, Set.empty))
@@ -210,11 +212,12 @@ messageDecisionToScore = \case
   ProbablySpamMessage score -> score
   MostLikelySpamMessage score -> score
 
-isKnownSpamMessage :: BotState -> MessageInfo -> BotM Bool
-isKnownSpamMessage BotState{..} msg =
-  maybe (pure False)
-    (\txt -> lookupCache spamMessages (MessageText txt) >>= pure . isJust)
-    (messageInfoText msg)
+isKnownSpamMessage :: WithBotState => MessageInfo -> BotM Bool
+isKnownSpamMessage msg =
+  let BotState {..} = ?model
+  in maybe (pure False)
+     (\txt -> lookupCache spamMessages (MessageText txt) >>= pure . isJust)
+     (messageInfoText msg)
 
 getUserScore
   :: (User -> Bool)
@@ -263,9 +266,10 @@ isKnownSpamerName ScoreSettings{scoreUserKnownSpamerNames} u =
 isPremiumScore :: ScoreSettings -> User -> Int
 isPremiumScore = getUserScore ((== Just True) . userIsPremium) scoreUserHasPremium
 
-getUserAdultScore :: BotState -> ChatState -> ScoreSettings -> User -> Int
-getUserAdultScore BotState{..} ChatState{..} ScoreSettings{..} u =
-  let go n c = n + if HS.member c adultEmoji then scoreUserAdultScore else 0
+getUserAdultScore :: WithBotState => ChatState -> ScoreSettings -> User -> Int
+getUserAdultScore ChatState{..} ScoreSettings{..} u =
+  let BotState {..} = ?model
+      go n c = n + if HS.member c adultEmoji then scoreUserAdultScore else 0
       computeScore txt = fromIntegral $ Text.foldl' go 0 txt
       getChatScore ChatInfo{..} = computeScore chatInfoName
         + maybe 0 computeScore chatInfoBio
@@ -306,15 +310,16 @@ messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} =
             else 0
 
 decideAboutMessage
-  :: BotState -> ChatState -> User -> Message -> MessageDecision
-decideAboutMessage model@BotState{..} ch user@User{userId} msg =
-  let Settings{..} = botSettings
+  :: WithBotState => ChatState -> User -> Message -> MessageDecision
+decideAboutMessage ch user@User{userId} msg =
+  let BotState {..} = ?model
+      Settings{..} = botSettings
       
       userMessageScore = UserMessageScore
         { userMessageScoreNoUsername = hasNoUsername scores user
         , userMessageScoreEmojiInName = doesNameContainEmoji ch scores user
         , userMessageScoreIsPremium = isPremiumScore scores user
-        , userMessageScoreAdult = getUserAdultScore model ch scores user
+        , userMessageScoreAdult = getUserAdultScore ch scores user
         , userMessageScoreKnownName = isKnownSpamerName scores user
         , userMessageScoreRichMarkup = messageContainsRichMarkup scores msg
         , userMessageScoreWords = messageWordsScore scores msg

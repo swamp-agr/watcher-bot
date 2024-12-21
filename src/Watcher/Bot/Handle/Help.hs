@@ -8,9 +8,10 @@ import Watcher.Bot.Cache
 import Watcher.Bot.Settings
 import Watcher.Bot.State
 
-directMessageReplyHelp :: BotState -> UserId -> MessageId -> BotM ()
-directMessageReplyHelp BotState{..} userId messageId = do
-  let Settings{..} = botSettings
+directMessageReplyHelp :: WithBotState => UserId -> MessageId -> BotM ()
+directMessageReplyHelp userId messageId = do
+  let BotState{..} = ?model
+      Settings{..} = botSettings
       HelpSettings{..} = helpSettings
   lookupCache admins userId >>= \case
     Nothing -> replyMarkdownText messageId publicHelp

@@ -6,9 +6,10 @@ import Watcher.Bot.Cache
 import Watcher.Bot.Settings
 import Watcher.Bot.State
 
-dumpAllCachesOnce :: BotState -> IO ()
-dumpAllCachesOnce BotState{..} = do
-  let Settings{..} = botSettings
+dumpAllCachesOnce :: WithBotState => IO ()
+dumpAllCachesOnce = do
+  let BotState {..} = ?model
+      Settings{..} = botSettings
       StorageSettings{..} = storage
 
   now <- getCurrentTime

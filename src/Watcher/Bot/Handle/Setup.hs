@@ -24,35 +24,37 @@ import Watcher.Bot.State.User
 import Watcher.Bot.Types
 import Watcher.Bot.Utils
 
-checkGroupSetup :: BotState -> ChatId -> MessageId -> BotM ()
-checkGroupSetup model chatId messageId = do
+checkGroupSetup :: WithBotState => ChatId -> MessageId -> BotM ()
+checkGroupSetup chatId messageId = do
   now <- liftIO getCurrentTime
-  sendEvent model (chatEvent now chatId EventGroupSetup)
+  sendEvent (chatEvent now chatId EventGroupSetup)
 
-  refreshChatAdmins model chatId
-  void $ call model (deleteMessage chatId messageId)
+  refreshChatAdmins chatId
+  void $ call (deleteMessage chatId messageId)
   pure ()
 
-checkUserSetup :: BotState -> UserId -> MessageId -> BotM ()
-checkUserSetup model@BotState{..} userId messageId = do
+checkUserSetup :: WithBotState => UserId -> MessageId -> BotM ()
+checkUserSetup userId messageId = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
-  sendEvent model (userEvent now userId EventUserSetup)
+  sendEvent (userEvent now userId EventUserSetup)
   -- at this point user *must be* admin.
   -- bot should be present in the group and expect @/setup@ there to fill admins cache in.
   mGroups <- lookupCache admins userId
 
   forM_ mGroups $ \userGroups -> case HS.size userGroups of
     -- set a single group up right away!
-    1 -> withSingleGroup userGroups $ setupSingleGroup model userId messageId
+    1 -> withSingleGroup userGroups $ setupSingleGroup userId messageId
 
     -- user is admin of multiple groups, which one they want to set up?
-    _ -> setupMultipleGroups model userId messageId userGroups
+    _ -> setupMultipleGroups userId messageId userGroups
 
   pure ()
 
-handleNavigate :: BotState -> ChatId -> MessageId -> MenuId -> BotM ()
-handleNavigate model@BotState{..} userChatId messageId menuId = do
-  let userId = coerce @_ @UserId userChatId
+handleNavigate :: WithBotState => ChatId -> MessageId -> MenuId -> BotM ()
+handleNavigate userChatId messageId menuId = do
+  let BotState {..} = ?model
+      userId = coerce @_ @UserId userChatId
   -- case: Alice (admin) forwards setup to Bob who is not admin
   -- Bob clicks menu button. Here we go, catching unexpected callback :)
   --
@@ -73,24 +75,24 @@ handleNavigate model@BotState{..} userChatId messageId menuId = do
           now <- liftIO getCurrentTime
           let evt = (chatEvent now chatId EventGroupSetupCompleted)
                 { eventUserId = Just userId }
-          sendEvent model evt
-          completeGroupSetup model chatId userId
-          replyDone model (CallbackSetup messageId)
+          sendEvent evt
+          completeGroupSetup chatId userId
+          replyDone (CallbackSetup messageId)
 
-        when (setupMenu menuId) $ groupSetup model chatId userId menuId
-        when (menuId == BotIsAdmin) $ refreshChatAdmins model chatId
+        when (setupMenu menuId) $ groupSetup chatId userId menuId
+        when (menuId == BotIsAdmin) $ refreshChatAdmins chatId
 
         writeCache users userId newerUserState
-        replyMenu model newMenuState (CallbackSetup messageId) chatId userId
+        replyMenu newMenuState (CallbackSetup messageId) chatId userId
 
-refreshChatAdmins :: BotState -> ChatId -> BotM ()
-refreshChatAdmins model@BotState{..} chatId = do
-  let ?model = model
+refreshChatAdmins :: WithBotState => ChatId -> BotM ()
+refreshChatAdmins chatId = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
   let st = fromMaybe (newChatState botSettings) mChatState
   when True $ do
-    mResponse <- call model (getChatAdministrators (SomeChatId chatId))
+    mResponse <- call (getChatAdministrators (SomeChatId chatId))
     forM_ mResponse $ \response -> if not (responseOk response)
       then liftIO (log' @String "Cannot retrieve admins")
       else do
@@ -103,7 +105,7 @@ refreshChatAdmins model@BotState{..} chatId = do
               }
         writeCache groups chatId newState
 
-        mChatResponse <- call model $ getChat (SomeChatId chatId)
+        mChatResponse <- call $ getChat (SomeChatId chatId)
         let mChatTitle = chatFullInfoTitle =<< (responseResult <$> mChatResponse)
 
         forM_ newChatAdmins $ \adminId -> do
@@ -113,14 +115,15 @@ refreshChatAdmins model@BotState{..} chatId = do
   pure ()
 
 setupMultipleGroups
-  :: BotState -> UserId -> MessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
-setupMultipleGroups model userId messageId userGroups = do
-  setMultipleRoot model userId userGroups
-  replyManyGroupsMenu model (ReplySetup messageId) userGroups
+  :: WithBotState => UserId -> MessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
+setupMultipleGroups userId messageId userGroups = do
+  setMultipleRoot userId userGroups
+  replyManyGroupsMenu (ReplySetup messageId) userGroups
 
-setMultipleRoot :: BotState -> UserId -> HashSet (ChatId, Maybe Text) -> BotM ()
-setMultipleRoot BotState{..} userId userGroups = alterCache users userId go
+setMultipleRoot :: WithBotState => UserId -> HashSet (ChatId, Maybe Text) -> BotM ()
+setMultipleRoot userId userGroups = alterCache users userId go
   where
+    BotState {..} = ?model
     chatMap = chatSetToMap userGroups
     menu = MultipleGroupsRoot { multipleGroupsMenu = chatMap }
     go = Just . setSetupUserState menu . fromMaybe newUserState
@@ -136,16 +139,17 @@ withSingleGroup groups action = case HS.toList groups of
   group : [] -> action group
   _ -> pure ()
 
-setupSingleGroup :: BotState -> UserId -> MessageId -> (ChatId, Maybe Text) -> BotM ()
-setupSingleGroup model userId messageId group = do
-  readyOrNot <- initGroupSetupMaybe model userId group
-  when readyOrNot $ setSingleRoot model userId (fst group)
+setupSingleGroup :: WithBotState => UserId -> MessageId -> (ChatId, Maybe Text) -> BotM ()
+setupSingleGroup userId messageId group = do
+  readyOrNot <- initGroupSetupMaybe userId group
+  when readyOrNot $ setSingleRoot userId (fst group)
   
-  replySingleGroupRoot model readyOrNot Nothing (ReplySetup messageId)
+  replySingleGroupRoot readyOrNot Nothing (ReplySetup messageId)
 
-setSingleRoot :: BotState -> UserId -> ChatId -> BotM ()
-setSingleRoot BotState{..} userId chatId = alterCache users userId go
+setSingleRoot :: WithBotState => UserId -> ChatId -> BotM ()
+setSingleRoot userId chatId = alterCache users userId go
   where
+    BotState{..}  = ?model
     menu =  SingleRoot
       { singleGroupChat = chatId
       , singleGroupSubMenu = MenuRoot
@@ -158,9 +162,9 @@ setSingleRoot BotState{..} userId chatId = alterCache users userId go
 -- * InProgress - either initiated by either current or some other admin.
 -- * Completed - it could be modified again.
 --
-initGroupSetupMaybe :: BotState -> UserId -> (ChatId, Maybe Text) -> BotM Bool
-initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
-  let ?model = model
+initGroupSetupMaybe :: WithBotState => UserId -> (ChatId, Maybe Text) -> BotM Bool
+initGroupSetupMaybe userId (chatId, _mChatname) = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
 
@@ -169,7 +173,7 @@ initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
     -- we need to retrieve chat admins just in case and make extra check
     -- whether user's admin or not.
     Nothing -> do
-      mResponse <- call model (getChatAdministrators (SomeChatId chatId))
+      mResponse <- call (getChatAdministrators (SomeChatId chatId))
       case mResponse of
         Nothing -> pure False
         Just Response{..} -> if not responseOk
@@ -182,10 +186,10 @@ initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
                 }
           if HS.member userId chatAdmins
             then do
-              overrideChatSettings model chatId newState userId now (chatSettings newState)
+              overrideChatSettings chatId newState userId now (chatSettings newState)
               pure True
             else do
-              userNoLongerAdmin model userId chatId
+              userNoLongerAdmin userId chatId
               pure False
     Just chatState@ChatState{..} -> do
       let userIsAdmin = HS.member userId chatAdmins
@@ -193,17 +197,17 @@ initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
         then pure False
         else case chatSetup of
           SetupNone -> do
-            overrideChatSettings model chatId chatState userId now chatSettings
+            overrideChatSettings chatId chatState userId now chatSettings
             pure True
           SetupCompleted {} -> do
-            overrideChatSettings model chatId chatState userId now chatSettings
+            overrideChatSettings chatId chatState userId now chatSettings
             pure True
           SetupInProgress {..} ->
             -- group setup is being locked by other admin and lock has not been expired yet
             if setupModifiedByAdmin /= userId && (setupModifiedAt `notLongAgoEnough` now)
               then pure False
               else do
-                overrideChatSettings model chatId chatState userId now chatSettings
+                overrideChatSettings chatId chatState userId now chatSettings
                 pure True
 
 retrieveDataFromSetup :: UserSetupState -> MenuId -> Maybe (ChatId, MenuState)
@@ -218,9 +222,10 @@ retrieveDataFromSetup setupState menu = case setupState of
 
 -- | If user was admin of a single group but not anymore,
 -- we discard cache for this user entirely.
-userNoLongerAdmin :: BotState -> UserId ->ChatId -> BotM ()
-userNoLongerAdmin BotState{..} userId chatId = alterCache admins userId (go chatId)
+userNoLongerAdmin :: WithBotState => UserId ->ChatId -> BotM ()
+userNoLongerAdmin userId chatId = alterCache admins userId (go chatId)
   where
+    BotState {..} = ?model
     go groupId = \case
       Nothing -> Nothing
       Just gs -> case HM.toList . HM.delete groupId . HM.fromList . HS.toList $ gs of
@@ -231,26 +236,29 @@ membersToAdminIds :: [ChatMember] -> HashSet UserId
 membersToAdminIds = HS.fromList . fmap (userId . chatMemberUser)
 
 overrideChatSettings
-  :: BotState
-  -> ChatId -> ChatState
+  :: WithBotState
+  => ChatId -> ChatState
   -> UserId -> UTCTime -> GroupSettings
   -> BotM ()
-overrideChatSettings BotState{..} chatId chatState userId now chatSettings = 
-  writeCache groups chatId $! setupChatSettings chatState userId now chatSettings
+overrideChatSettings chatId chatState userId now chatSettings =
+  let BotState{..} = ?model
+  in writeCache groups chatId $! setupChatSettings chatState userId now chatSettings
 
-completeGroupSetup :: BotState -> ChatId -> UserId -> BotM ()
-completeGroupSetup BotState{..} chatId userId = do
+completeGroupSetup :: WithBotState => ChatId -> UserId -> BotM ()
+completeGroupSetup chatId userId = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
   alterCache groups chatId (go now)
   where
     go _time Nothing = Nothing
     go time (Just prevState) = Just $! prevState { chatSetup = SetupCompleted userId time }
 
-groupSetup :: BotState -> ChatId -> UserId -> MenuId -> BotM ()
-groupSetup model@BotState{..} chatId userId menuId = do
+groupSetup :: WithBotState => ChatId -> UserId -> MenuId -> BotM ()
+groupSetup chatId userId menuId = do
+  let BotState {..} = ?model
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
   let chatState = (fromMaybe (newChatState botSettings) mChatState)
       nextChatSettings = alterSettings (chatSettings chatState) menuId
-  overrideChatSettings model chatId chatState userId now nextChatSettings
+  overrideChatSettings chatId chatState userId now nextChatSettings
 

@@ -62,8 +62,9 @@ chatEvent time chatId evtType = (event time evtType) { eventChatId = Just chatId
 userEvent :: UTCTime -> UserId -> EventType -> Event
 userEvent time userId evtType = (event time evtType) { eventUserId = Just userId }
 
-sendEvent :: BotState -> Event -> BotM ()
-sendEvent BotState {..} evt = do
+sendEvent :: WithBotState => Event -> BotM ()
+sendEvent evt = do
+  let BotState {..} = ?model
   let Settings {..} = botSettings
       AnalyticsSettings{..} = analytics
 
