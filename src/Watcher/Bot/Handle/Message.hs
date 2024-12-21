@@ -42,6 +42,7 @@ handleAnalyseMessage model@BotState{..} chatId userId message = do
 
 handleTuning :: BotState -> Update -> BotM ()
 handleTuning model@BotState{..} Update{..} = do
+  let ?model = model
   let mMsg = asum [ updateMessage, updateEditedMessage ]
   forM_ mMsg $ \origMsg -> do
     void $ call model

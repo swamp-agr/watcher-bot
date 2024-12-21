@@ -85,6 +85,7 @@ handleNavigate model@BotState{..} userChatId messageId menuId = do
 
 refreshChatAdmins :: BotState -> ChatId -> BotM ()
 refreshChatAdmins model@BotState{..} chatId = do
+  let ?model = model
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
   let st = fromMaybe (newChatState botSettings) mChatState
@@ -159,6 +160,7 @@ setSingleRoot BotState{..} userId chatId = alterCache users userId go
 --
 initGroupSetupMaybe :: BotState -> UserId -> (ChatId, Maybe Text) -> BotM Bool
 initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
+  let ?model = model
   now <- liftIO getCurrentTime
   mChatState <- lookupCache groups chatId
 
@@ -171,7 +173,7 @@ initGroupSetupMaybe model@BotState{..} userId (chatId, _mChatname) = do
       case mResponse of
         Nothing -> pure False
         Just Response{..} -> if not responseOk
-          then liftIO (log' @String "Cannot retrieve admins") >> pure False
+          then liftIO (logT "Cannot retrieve admins") >> pure False
           else do
           let chatAdmins = membersToAdminIds responseResult
               newState = (newChatState botSettings)

@@ -27,13 +27,15 @@ import Watcher.Bot.Utils
 
 handleDebug :: BotState -> Update -> BotM ()
 handleDebug model upd@Update{..} = do
+  let ?model = model
   liftIO (log' upd)
   let mMsg = asum [updateMessage, updateEditedMessage]
   forM_ mMsg (debug model)
   pure ()
 
 handleDebugCallback :: BotState -> CallbackQuery -> BotM ()
-handleDebugCallback _model q = do
+handleDebugCallback model q = do
+  let ?model = model
   liftIO (log' q)
   pure ()
 
@@ -61,15 +63,16 @@ debugSetup model@BotState{..} Message{..} = do
 
 debugSpam :: BotState -> Message -> BotM ()
 debugSpam model@BotState{..} msg = do
+  let ?model = model
   now <- liftIO getCurrentTime
-  liftIO $ log' ("debugSpam" :: Text)
+  liftIO $ logT "debugSpam"
   -- it *must* be reply to some other message
   forM_ (messageReplyToMessage msg) $ \orig -> do
     let mUserId = userId <$> messageFrom msg
         Chat{..} = messageChat msg
         group = (chatId, chatUsername)
 
-    liftIO $ log' ("this is a reply" :: Text)
+    liftIO $ logT "this is a reply"
 
     forM_ mUserId $ \userId' -> do
       let setBan st = case messageText orig of
@@ -94,7 +97,8 @@ debugSpam model@BotState{..} msg = do
       handleBanAction model chatId ch (VoterId userId') mid $! messageToMessageInfo orig
 
 debugGetChatAdmins :: BotState -> Message -> BotM ()
-debugGetChatAdmins BotState{clientEnv} msg = do
+debugGetChatAdmins model@BotState{clientEnv} msg = do
+  let ?model = model
   let Chat{..} = messageChat msg
   mResponse <- liftIO $ do
     eres <- flip runClientM clientEnv $ getChatAdministrators (SomeChatId chatId)
@@ -110,6 +114,7 @@ debugGetChatAdmins BotState{clientEnv} msg = do
 
 handleGetChatMember :: BotState -> ChatId -> BotM ()
 handleGetChatMember model@BotState{..} chatId = do
+  let ?model = model
   let Settings {..} = botSettings
   forM_ ownerGroup $ \OwnerGroupSettings {} -> lookupCache groups chatId >>= \case
     Nothing -> replyText "No data for requested chat"

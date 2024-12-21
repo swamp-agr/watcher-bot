@@ -48,13 +48,15 @@ watcherBot st = BotApp
 
 dumpAllCaches :: BotState -> IO ()
 dumpAllCaches model@BotState{..} = do
+  let ?model = model
   let Settings {..} = botSettings
       WorkersSettings {..} = workers
 
   every dump $ dumpAllCachesOnce model
 
 cleanAllCaches :: BotState -> IO ()
-cleanAllCaches BotState{..} = do
+cleanAllCaches model@BotState{..} = do
+  let ?model = model
   let Settings {..} = botSettings
       StorageSettings {..} = storage
       WorkersSettings {..} = workers
@@ -62,7 +64,7 @@ cleanAllCaches BotState{..} = do
   every cleanup $ mapM_ cleanCache
     [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, selfDestructionSetPath ]
 
-every :: HasCallStack => WorkerSettings -> IO () -> IO ()
+every :: (?model :: BotState) => HasCallStack => WorkerSettings -> IO () -> IO ()
 every WorkerSettings{..} action = do
   logT $ "Start worker: " <> workerName
   forever $ do
@@ -83,7 +85,7 @@ gatherCacheStats title cache = do
   pure $ Text.concat
     [ title, ": ", s2t cacheSize]
 
-gatherStatistics :: BotState -> IO ()
+gatherStatistics :: (?model :: BotState) => BotState -> IO ()
 gatherStatistics model@BotState{..} = every statistics $ do
   groupsStats <- gatherCacheStats "Groups" groups
   adminsStats <- gatherCacheStats "Admins" admins
@@ -150,6 +152,7 @@ autoban model@BotState{..} = do
 -- | Initiate Telegram Env, 'Model', start Bot, start backends concurrently.
 runTelegramBot :: Model -> IO ()
 runTelegramBot st@BotState{..} = do
+  let ?model = st
   botActionFun <- startBotAsync (watcherBot st) clientEnv
   runConcurrently $
     Concurrently (selfDestructMessages st botActionFun) <*
