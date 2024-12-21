@@ -113,6 +113,7 @@ data Action
 
   -- Background
   | DeleteMessage ChatId MessageId
+  | CheckChatMember ChatId UserId
 
   -- Help
   | DirectMessageHelp UserId MessageId

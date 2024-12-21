@@ -1,6 +1,7 @@
 module Watcher.Bot.Handle.Message where
 
 import Control.Applicative ((<|>))
+import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Monad (forM, forM_, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
@@ -9,7 +10,7 @@ import Data.Foldable (asum)
 import Data.Map.Strict (Map)
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.Text (Text)
-import Data.Time (getCurrentTime)
+import Data.Time (addUTCTime, getCurrentTime)
 import Dhall (Natural)
 import Telegram.Bot.API
 import Telegram.Bot.API.Names
@@ -138,8 +139,15 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
         pure Nothing
 
       Nothing -> do
+        now <- liftIO getCurrentTime
         let userChatId = SomeChatId $ coerce @_ @ChatId uid
+            evt = UserChatMemberCheckEvent $! UserChatMemberCheck
+              { userChatMemberCheckChatId = chatId
+              , userChatMemberCheckUserId = uid
+              , userChatMemberCheckTime = addUTCTime (5 * 60) now
+              }
         mResponse <- call $ getChat userChatId
+        liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
         pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
   let toQuarantineEntry (mChat, User{..}) = (userId, (mChat, Set.empty))

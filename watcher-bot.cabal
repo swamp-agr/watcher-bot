@@ -64,6 +64,7 @@ library
                       Watcher.Bot.Cache
                       Watcher.Bot.Handle
                       Watcher.Bot.Handle.Ban
+                      Watcher.Bot.Handle.ChatMember
                       Watcher.Bot.Handle.Contact
                       Watcher.Bot.Handle.Debug
                       Watcher.Bot.Handle.Dump
@@ -78,6 +79,7 @@ library
                       Watcher.Bot.State
                       Watcher.Bot.State.Chat
                       Watcher.Bot.State.User
+                      Watcher.Bot.Trigger
                       Watcher.Bot.Types
                       Watcher.Bot.Types.Action
                       Watcher.Bot.Types.ChatInfo

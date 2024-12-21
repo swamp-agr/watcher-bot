@@ -2,7 +2,7 @@ module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Monad (forever, forM, forM_, join, when)
+import Control.Monad (forever, forM, forM_, join)
 import Data.IORef (readIORef, newIORef, modifyIORef')
 import Data.Text (Text)
 import GHC.Stack (HasCallStack)
@@ -22,9 +22,8 @@ import qualified Options.Applicative as OA
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle
-import Watcher.Bot.Handle.Ban
+import Watcher.Bot.Handle.ChatMember
 import Watcher.Bot.Handle.Dump
-import Watcher.Bot.Handle.Message
 import Watcher.Bot.ModelChecker
 import Watcher.Bot.Parse
 import Watcher.Bot.Reply
@@ -32,6 +31,7 @@ import Watcher.Bot.Settings
 import Watcher.Bot.State
 import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
+import Watcher.Bot.Trigger
 import Watcher.Bot.Utils
 import Watcher.Orphans ()
 
@@ -63,7 +63,7 @@ cleanAllCaches model@BotState{..} = do
       WorkersSettings {..} = workers
 
   every cleanup $ mapM_ cleanCache
-    [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, selfDestructionSetPath ]
+    [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, eventSetPath ]
 
 every :: WithBotState => HasCallStack => WorkerSettings -> IO () -> IO ()
 every WorkerSettings{..} action = do
@@ -94,7 +94,7 @@ gatherStatistics = every statistics $ do
   usersStats <- gatherCacheStats "Users" users
   blocklistStats <- gatherCacheStats "Blocklist" blocklist
   spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages
-  selfDestructionSetStats <- gatherCacheStats "Self-destruct message queue" selfDestructionSet
+  eventSetStats <- gatherCacheStats "Self-destruct message queue" eventSet
   replyStats $ Text.unlines
     [ "Statistics"
     , ""
@@ -103,7 +103,7 @@ gatherStatistics = every statistics $ do
     , usersStats
     , blocklistStats
     , spamMessagesStats
-    , selfDestructionSetStats
+    , eventSetStats
     ]
   where
     BotState{..} = ?model
@@ -138,16 +138,12 @@ autoban = do
   messages <- forM (HM.toList groupsMap) $ \(chatId, ChatState{..}) -> do
     chatMemberStats <- newIORef (HM.empty @Text @Int)
     forM_ (HM.keys quarantine) $ \userId -> do
-      mResponse <- call $ getChatMember (SomeChatId chatId) userId
+      status <- handleCheckChatMember chatId userId
 
-      let status = maybe "unknown" (chatMemberStatus . responseResult) mResponse :: Text
-          go Nothing = Just 1
+      let go Nothing = Just 1
           go (Just v) = Just $! v + 1
-      modifyIORef' chatMemberStats (HM.alter go status)
 
-      when (status == "kicked") $ do
-        updateBlocklist chatId userId Nothing
-        endQuarantineForUser chatId userId
+      modifyIORef' chatMemberStats (HM.alter go status)
 
     modifyIORef' chatCounter (+ 1)
     makeChatReport chatId chatMemberStats
@@ -159,7 +155,7 @@ runTelegramBot st@BotState{..} = do
   let ?model = st
   botActionFun <- startBotAsync watcherBot clientEnv
   runConcurrently $
-    Concurrently (selfDestructMessages botActionFun) <*
+    Concurrently (processTriggeredEvents botActionFun) <*
     Concurrently (cleanAllCaches st) <*
     Concurrently (dumpAllCaches st) <*
     Concurrently getSelf <*

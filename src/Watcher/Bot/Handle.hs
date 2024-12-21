@@ -7,6 +7,7 @@ import Telegram.Bot.API
 import Telegram.Bot.Simple
 
 import Watcher.Bot.Handle.Ban
+import Watcher.Bot.Handle.ChatMember
 import Watcher.Bot.Handle.Contact
 import Watcher.Bot.Handle.Debug
 import Watcher.Bot.Handle.Dump
@@ -114,5 +115,10 @@ handleAction (Dump _message) model = model <# do
 -- | Async action: part of self-destruct mechanics. Bot will delete the message if possible.
 handleAction (DeleteMessage chatId messageId) model = model <# do
   void $ call $ deleteMessage chatId messageId
+  pure ()
+
+-- | Async action: check user member, if kicked, ban them everywhere too.
+handleAction (CheckChatMember chatId userId) model = model <# do
+  void $ handleCheckChatMember chatId userId
   pure ()
 
