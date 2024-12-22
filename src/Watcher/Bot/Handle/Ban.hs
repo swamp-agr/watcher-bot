@@ -5,7 +5,7 @@ import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_, void, when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
 import Telegram.Bot.API
@@ -144,7 +144,11 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
     else do
       botItself <- liftIO $ readTVarIO self
       let spamerId = SpamerId $! userInfoId spamer
-          mVoterIdOrBotId = mVoterId <|> ((VoterId . userInfoId) <$> botItself)
+          mBotId = (VoterId . userInfoId) <$> botItself
+          mVoterIdOrBotId = mVoterId <|> mBotId
+          voter = if isNothing mVoterIdOrBotId || isJust mBotId
+            then BotVoter
+            else UserVoter
           mPollState = HM.lookup spamerId activePolls
 
           adminReported = coerce spamerId `HS.member` chatAdmins
@@ -152,7 +156,7 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
 
       unless (adminReported || selfReport) $ do
         mPoll <- case mPollState of
-          Nothing -> createBanPoll ch chatId spamerId mVoterIdOrBotId consensus spamer
+          Nothing -> createBanPoll ch chatId spamerId mVoterIdOrBotId voter consensus spamer
             $! messageInfoId orig
           Just poll -> do
             let currentPollSize = HS.size (pollVoters poll)
@@ -277,16 +281,17 @@ createBanPoll
   -> ChatId
   -> SpamerId
   -> Maybe VoterId
+  -> Voter
   -> Integer -- votes required for ban decision
   -> UserInfo -- spamer
   -> MessageId
   -> BotM (Maybe (Bool, PollState))
-createBanPoll st chatId spamerId mVoterId consensus spamer messageId = do
+createBanPoll st chatId spamerId mVoterId voter consensus spamer messageId = do
   let BotState{..} = ?model
   let keyboard = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId
         }
-      replyMsg = (toReplyMessage (voteMessage (maybe 0 (const 1) mVoterId) consensus))
+      replyMsg = (toReplyMessage (voteMessage voter (maybe 0 (const 1) mVoterId) consensus))
         { replyMessageReplyToMessageId = Just messageId
         , replyMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
@@ -319,7 +324,7 @@ updateBanPoll st@ChatState{..} chatId spamerId voters consensus poll@PollState{.
   let keyboard = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId
         }
-      editMsgTxt = voteMessage voters consensus
+      editMsgTxt = voteMessage UserVoter voters consensus
       editMsg = (toEditMessage editMsgTxt)
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
         }
@@ -327,11 +332,19 @@ updateBanPoll st@ChatState{..} chatId spamerId voters consensus poll@PollState{.
 
   editMessage editId editMsg
 
-voteMessage :: Int -> Integer -> Text
-voteMessage voters consensus = Text.concat
-  [ "Someone decided that this is a spamer. Is it correct? Vote ("
+data Voter = BotVoter | UserVoter
+  deriving (Eq, Show)
+
+voteMessage :: Voter -> Int -> Integer -> Text
+voteMessage voter voters consensus = Text.concat
+  [ textVoter
+  , " decided that this is a spamer. Is it correct? Vote ("
   , s2t voters , "/", s2t consensus, ")"
   ]
+  where
+    textVoter = case voter of
+      BotVoter -> "Bot"
+      UserVoter -> "Someone"
 
 voteButtons :: ChatId -> SpamerId -> [[InlineKeyboardButton]]
 voteButtons chatId spamerId =
