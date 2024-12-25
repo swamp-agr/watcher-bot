@@ -43,7 +43,8 @@ handleUnbanAction chatId ch adminId messageId someChatId = do
             pure Nothing
           Just userId -> pure (Just userId)
     forM_ mUserId $ \userId -> do
-      mResponse <- call (getChat someChatId)
+      let userChatId = coerce @_ @ChatId userId
+      mResponse <- call (getChat $ SomeChatId userChatId)
       forM_ mResponse $ \chatResponse -> do
         let c = responseResult chatResponse
             userInfo = chatFullInfoToUserInfo c
