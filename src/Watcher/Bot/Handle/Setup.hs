@@ -109,7 +109,7 @@ refreshChatAdmins chatId = do
         let mChatTitle = chatFullInfoTitle =<< (responseResult <$> mChatResponse)
 
         forM_ newChatAdmins $ \adminId -> do
-          let go Nothing = Just $! HS.singleton (chatId, Nothing)
+          let go Nothing = Just $! HS.singleton (chatId, mChatTitle)
               go (Just set) = Just $! HS.insert (chatId, mChatTitle) set
           alterCache admins adminId go
   pure ()
