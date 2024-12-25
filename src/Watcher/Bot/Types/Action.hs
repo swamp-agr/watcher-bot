@@ -129,9 +129,6 @@ data Action
   -- Dump
   | Dump Message
 
-  -- Datafix: untitled chats in menu
-  | FixChatTitles
-
   -- debug
   | Debug Update 
   | DebugCallback CallbackQuery
