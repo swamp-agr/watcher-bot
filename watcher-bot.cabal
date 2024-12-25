@@ -88,6 +88,7 @@ library
                       Watcher.Bot.Types.MessageFrom
                       Watcher.Bot.Types.UserInfo
                       Watcher.Bot.Utils
+                      Watcher.Migration
                       Watcher.Orphans
                       Telegram.Bot.API.Names
 

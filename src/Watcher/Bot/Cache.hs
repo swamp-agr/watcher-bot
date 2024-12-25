@@ -60,6 +60,16 @@ getCacheSize cache = do
   content <- atomically $! readTVar cache
   pure $! Fold.length content
 
+getRecentCacheFilePathMaybe :: FilePath -> IO (Maybe FilePath)
+getRecentCacheFilePathMaybe dir = do
+  mDayDir <- getLastFilepath "cache"
+  let getFullPathMaybe dayDir = do
+        mFilePath <- getLastFilepath ("cache" </> dayDir </> dir)
+        let makeFullPath :: FilePath -> FilePath
+            makeFullPath file = "." </> "cache" </> dayDir </> dir </> file
+        pure (makeFullPath <$> mFilePath)
+  maybe (pure Nothing) getFullPathMaybe mDayDir
+
 importCache :: (FromDhall a, Monoid a) => FilePath -> IO (TVar a)
 importCache dir = do
   mDayDir <- getLastFilepath "cache"
@@ -83,9 +93,13 @@ cleanCache dir = do
         let makeCacheDir d = "cache" </> d </> dir
         forM_ days $ \day -> removeDirectoryIfExist (makeCacheDir day)
 
+lookupCacheWith
+  :: (MonadIO m, Hashable k) => TVar cache -> (cache -> HashMap k v) -> k -> m (Maybe v)
+lookupCacheWith cache mapFromCache key = liftIO $! atomically $! do
+  readTVar cache >>= \content -> pure $! HM.lookup key $! mapFromCache content
+
 lookupCache :: (MonadIO m, Hashable k) => TVar (HashMap k v) -> k -> m (Maybe v)
-lookupCache cache key = liftIO $! atomically $! do
-  readTVar cache >>= \map' -> pure $! HM.lookup key map'
+lookupCache cache key = lookupCacheWith cache id key
 
 writeCache :: (MonadIO m, Hashable k) => TVar (HashMap k v) -> k -> v -> m ()
 writeCache cache key value =
@@ -100,6 +114,10 @@ alterCache cache key modifier =
 readCache
   :: MonadIO m => TVar cache -> m cache
 readCache = liftIO . atomically . readTVar
+
+readCacheWith
+  :: (MonadIO m, Hashable k) => (cache -> HashMap k v) -> TVar cache -> m (HashMap k v)
+readCacheWith getter cache = (liftIO . atomically . readTVar) cache >>= pure . getter
 
 removeDirectoryIfExist :: FilePath -> IO ()
 removeDirectoryIfExist dir = do

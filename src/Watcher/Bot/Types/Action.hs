@@ -6,6 +6,7 @@ import Telegram.Bot.API
 
 import Watcher.Bot.Settings
 import Watcher.Bot.Types.Common
+import Watcher.Bot.Types.UserInfo
 
 data VoteBanId
   = VoteForBan ChatId SpamerId
@@ -113,7 +114,7 @@ data Action
 
   -- Background
   | DeleteMessage ChatId MessageId
-  | CheckChatMember ChatId UserId
+  | CheckChatMember ChatId UserInfo
 
   -- Help
   | DirectMessageHelp UserId MessageId

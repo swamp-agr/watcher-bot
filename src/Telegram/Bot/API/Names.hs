@@ -38,3 +38,9 @@ makeLink entityType idSelector usernameSelector getName v = case usernameSelecto
     , "</a>"
     ]
   Just username -> Text.cons '@' username
+
+normaliseUsername :: Text -> Maybe Text
+normaliseUsername txt = case Text.uncons txt of
+  Nothing -> Nothing
+  Just ('@', _) -> Just txt
+  Just (_, _)   -> Just $ Text.cons '@' txt

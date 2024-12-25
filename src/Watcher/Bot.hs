@@ -33,6 +33,7 @@ import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
 import Watcher.Bot.Trigger
 import Watcher.Bot.Utils
+import Watcher.Migration
 import Watcher.Orphans ()
 
 -- | Initiate bot app based on a 'Model'.
@@ -62,6 +63,7 @@ cleanAllCaches model@BotState{..} = do
       StorageSettings {..} = storage
       WorkersSettings {..} = workers
 
+  wait (60 * 60)
   every cleanup $ mapM_ cleanCache
     [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, eventSetPath ]
 
@@ -87,12 +89,18 @@ gatherCacheStats title cache = do
   pure $ Text.concat
     [ title, ": ", s2t cacheSize]
 
+gatherBlocklistStats :: TVar Blocklist -> IO Text
+gatherBlocklistStats cache =  do
+  content <- readCacheWith spamerBans cache
+  pure $ Text.concat
+    [ "Blocklist: " <> s2t (HM.size content) ]
+
 gatherStatistics :: WithBotState => IO ()
 gatherStatistics = every statistics $ do
   groupsStats <- gatherCacheStats "Groups" groups
   adminsStats <- gatherCacheStats "Admins" admins
   usersStats <- gatherCacheStats "Users" users
-  blocklistStats <- gatherCacheStats "Blocklist" blocklist
+  blocklistStats <- gatherBlocklistStats blocklist
   spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages
   eventSetStats <- gatherCacheStats "Self-destruct message queue" eventSet
   replyStats $ Text.unlines
@@ -177,7 +185,8 @@ run = join $ execParser (info (opts <**> helper) fullDesc)
 opts :: OA.Parser (IO ())
 opts = subparser
   (  OA.command "bot" (info (pure runBot) (progDesc "Run telegram-bot"))
-  <> OA.command "modelchecker" (info modelChecker (progDesc "Run model-checker")) 
+  <> OA.command "modelchecker" (info modelChecker (progDesc "Run model-checker"))
+  <> OA.command "migration" (info (pure migrate) (progDesc "Run migrations"))
   )
 
 runBot :: IO ()
