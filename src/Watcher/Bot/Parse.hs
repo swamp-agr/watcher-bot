@@ -30,7 +30,6 @@ updateToAction settings@Settings{..} update
   | isCommand "tuning" update = handleTuning settings update
   | isCommand "dump" update = handleDump settings update
   | isCommand "getChatMember" update = handleGetChatMember settings update
-  | isCommand "refreshChatTitles" update = handleRefreshChatTitles settings update
 
   --   dm
   | isCommand "contact" update = handleContact settings update
@@ -187,14 +186,6 @@ handleDump settings Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
         OwnerGroup -> Just $! Dump msg
-        _ -> Nothing
-  | otherwise = Nothing
-
-handleRefreshChatTitles :: Settings -> Update -> Maybe Action
-handleRefreshChatTitles settings  Update{..}
-  | Just msg <- asum [ updateMessage, updateEditedMessage ] =
-      case messageSentFrom settings msg of
-        OwnerGroup -> Just FixChatTitles
         _ -> Nothing
   | otherwise = Nothing
 
