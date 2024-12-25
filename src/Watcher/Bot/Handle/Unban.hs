@@ -2,6 +2,7 @@ module Watcher.Bot.Handle.Unban where
 
 import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Coerce (coerce)
 import Data.Time (getCurrentTime)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
@@ -9,6 +10,7 @@ import Telegram.Bot.Simple
 import qualified Data.HashSet as HS
 
 import Watcher.Bot.Analytics
+import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
 import Watcher.Bot.Reply
 import Watcher.Bot.Settings
@@ -32,40 +34,48 @@ handleUnbanAction chatId ch adminId messageId someChatId = do
   
   void $ call (deleteMessage chatId messageId)
   when (adminId `HS.member` chatAdmins ch) $ do
-    mResponse <- call (getChat someChatId)
-    forM_ mResponse $ \chatResponse -> do
-      let c = responseResult chatResponse
-          userInfo = chatFullInfoToUserInfo c
-          userId = userInfoId userInfo
-      lookupBlocklist blocklist userId >>= \case
-        Nothing -> selfDestructReply chatId ch (ReplyUserHasNotBeenBanned userInfo)
-        Just BanState{..} -> if bannedChats `elem` [HS.singleton chatId, HS.empty]
-          then do
-            end <- liftIO getCurrentTime
-            let evt = (chatEvent end chatId EventGroupUnban)
-                  { eventUserId = Just adminId
-                  , eventData = Just "unban_globally"
-                  }
-            sendEvent evt
-            
-            alterBlocklist blocklist userInfo $! const Nothing
-            let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
-            mUnbanResponse <- call $ unbanChatMember unbanReq
-            when ((responseResult <$> mUnbanResponse) == Just True) $ 
-              selfDestructReply chatId ch (ReplyUserHasBeenUnbanned userInfo)
-          else do
-            end <- liftIO getCurrentTime
-            let evt = (chatEvent end chatId EventGroupUnban)
-                  { eventUserId = Just adminId
-                  , eventData = Just "unban_locally"
-                  }
-            sendEvent evt
+    mUserId <- case someChatId of
+      SomeChatId userChatId -> pure $ Just $ coerce @_ @UserId userChatId
+      SomeChatUsername username ->
+        lookupCacheWith blocklist spamerUsernames username >>= \case
+          Nothing -> do
+            selfDestructReply chatId ch (ReplyUnknownUsername username)
+            pure Nothing
+          Just userId -> pure (Just userId)
+    forM_ mUserId $ \userId -> do
+      mResponse <- call (getChat someChatId)
+      forM_ mResponse $ \chatResponse -> do
+        let c = responseResult chatResponse
+            userInfo = chatFullInfoToUserInfo c
+        lookupBlocklist blocklist userId >>= \case
+          Nothing -> selfDestructReply chatId ch (ReplyUserHasNotBeenBanned userInfo)
+          Just BanState{..} -> if bannedChats `elem` [HS.singleton chatId, HS.empty]
+            then do
+              end <- liftIO getCurrentTime
+              let evt = (chatEvent end chatId EventGroupUnban)
+                    { eventUserId = Just adminId
+                    , eventData = Just "unban_globally"
+                    }
+              sendEvent evt
 
-            allowUserInGroup ch chatId userId
-            let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
-            mUnbanResponse <- call $ unbanChatMember unbanReq
-            when ((fmap responseResult mUnbanResponse) == Just True) $ 
-              selfDestructReply chatId ch (ReplyUserHasBeenUnbanned userInfo)
+              alterBlocklist blocklist userInfo $! const Nothing
+              let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
+              mUnbanResponse <- call $ unbanChatMember unbanReq
+              when ((responseResult <$> mUnbanResponse) == Just True) $ 
+                selfDestructReply chatId ch (ReplyUserHasBeenUnbanned userInfo)
+            else do
+              end <- liftIO getCurrentTime
+              let evt = (chatEvent end chatId EventGroupUnban)
+                    { eventUserId = Just adminId
+                    , eventData = Just "unban_locally"
+                    }
+              sendEvent evt
+
+              allowUserInGroup ch chatId userId
+              let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
+              mUnbanResponse <- call $ unbanChatMember unbanReq
+              when ((fmap responseResult mUnbanResponse) == Just True) $ 
+                selfDestructReply chatId ch (ReplyUserHasBeenUnbanned userInfo)
 
 -- | This could be originated in owners group only.
 handleGlobalUnbanAction :: WithBotState => MessageId -> SomeChatId -> BotM ()

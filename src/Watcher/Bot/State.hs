@@ -17,6 +17,7 @@ import Katip
 import Servant.Client (ClientEnv, ClientM, runClientM)
 import System.IO (stdout)
 import Telegram.Bot.API
+import Telegram.Bot.API.Names
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -132,7 +133,10 @@ alterBlocklist
 alterBlocklist cache UserInfo{..} modifier =
   let modifyUsername x = case userInfoUsername of
         Nothing -> x
-        Just username -> HM.insert username userInfoId x
+        Just username ->
+          let normalUsername = normaliseUsername username
+              insertUsername u = HM.insert u userInfoId x
+          in maybe x insertUsername normalUsername
       alter b@Blocklist{..} = b
         { spamerBans = HM.alter modifier userInfoId spamerBans
         , spamerUsernames = modifyUsername spamerUsernames
