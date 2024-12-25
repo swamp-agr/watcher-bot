@@ -109,8 +109,9 @@ refreshChatAdmins chatId = do
         let mChatTitle = chatFullInfoTitle =<< (responseResult <$> mChatResponse)
 
         forM_ newChatAdmins $ \adminId -> do
-          let go Nothing = Just $! HS.singleton (chatId, mChatTitle)
-              go (Just set) = Just $! HS.insert (chatId, mChatTitle) set
+          let datafix = HS.fromList . HM.toList . HM.fromListWith max . HS.toList
+              go Nothing = Just $! HS.singleton (chatId, mChatTitle)
+              go (Just set) = Just $! HS.insert (chatId, mChatTitle) $! datafix set
           alterCache admins adminId go
   pure ()
 
