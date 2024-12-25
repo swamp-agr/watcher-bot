@@ -40,6 +40,7 @@ data ReplyAnswerType
   | ReplyUserHasBeenUnbanned { replyUserHasBeenUnbanned :: UserInfo }
   | ReplyUserAlreadyBanned { replyUserAlreadyBanned :: UserInfo }
   | ReplyUserRecovered { replyUserRecovered :: UserInfo }
+  | ReplyUnknownUsername { replyUnknownUsername :: Text }
   | ReplyConsensus Int
 
 renderAnswer :: ReplyAnswerType -> Text
@@ -81,6 +82,11 @@ renderAnswer = \case
       [ "User "
       , userInfoLink u
       , " has been successfully unbanned."
+      ]
+  ReplyUnknownUsername txt ->
+    Text.concat
+      [ "User ", txt, " could not be identified due to Telegram limitations. "
+      , "Try to obtain id via @getInfoByIdBot"
       ]
 
 selfDestructReply :: WithBotState => ChatId -> ChatState -> ReplyAnswerType -> BotM ()
