@@ -129,9 +129,6 @@ data Action
   -- Dump
   | Dump Message
 
-  -- Datafix: fill in usernames of spamers
-  | HistoricalSpamerUsernames
-
   -- debug
   | Debug Update 
   | DebugCallback CallbackQuery

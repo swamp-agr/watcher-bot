@@ -30,7 +30,6 @@ updateToAction settings@Settings{..} update
   | isCommand "tuning" update = handleTuning settings update
   | isCommand "dump" update = handleDump settings update
   | isCommand "getChatMember" update = handleGetChatMember settings update
-  | isCommand "updateSpamerUsernames" update = handleUpdateSpamerUsernames settings update
 
   --   dm
   | isCommand "contact" update = handleContact settings update
@@ -187,14 +186,6 @@ handleDump settings Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
         OwnerGroup -> Just $! Dump msg
-        _ -> Nothing
-  | otherwise = Nothing
-
-handleUpdateSpamerUsernames :: Settings -> Update -> Maybe Action
-handleUpdateSpamerUsernames settings Update{..}
-  | Just msg <- asum [ updateMessage, updateEditedMessage ] =
-      case messageSentFrom settings msg of
-        OwnerGroup -> Just HistoricalSpamerUsernames
         _ -> Nothing
   | otherwise = Nothing
 

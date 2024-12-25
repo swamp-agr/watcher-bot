@@ -112,9 +112,6 @@ handleAction (PublicHelp _chatId messageId) model = model <# do
 handleAction (Dump _message) model = model <# do
   liftIO dumpAllCachesOnce
 
-handleAction HistoricalSpamerUsernames model = model <# do
-  updateSpamerUsernames
-
 -- | Async action: part of self-destruct mechanics. Bot will delete the message if possible.
 handleAction (DeleteMessage chatId messageId) model = model <# do
   void $ call $ deleteMessage chatId messageId
