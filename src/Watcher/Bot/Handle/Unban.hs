@@ -1,5 +1,6 @@
 module Watcher.Bot.Handle.Unban where
 
+import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
@@ -7,6 +8,7 @@ import Data.Time (getCurrentTime)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
 
+import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import Watcher.Bot.Analytics
@@ -83,14 +85,14 @@ handleGlobalUnbanAction :: WithBotState => MessageId -> SomeChatId -> BotM ()
 handleGlobalUnbanAction messageId someChatId = do
   let BotState {..} = ?model
       Settings {..} = botSettings
-  forM_ ownerGroup $ \OwnerGroupSettings {..} -> do
+  forM_ ownerGroup \OwnerGroupSettings {..} -> do
     let chatId = ChatId ownerGroupId
     begin <- liftIO getCurrentTime
     sendEvent (chatEvent begin chatId EventGroupUnban)
 
     void $ call (deleteMessage chatId messageId)
     mResponse <- call (getChat someChatId)
-    forM_ mResponse $ \chatResponse -> do
+    forM_ mResponse \chatResponse -> do
       let c = responseResult chatResponse
           userInfo = chatFullInfoToUserInfo c
           userId = userInfoId userInfo
@@ -99,6 +101,21 @@ handleGlobalUnbanAction messageId someChatId = do
         Just BanState {..} -> do
           alterBlocklist blocklist userInfo $! const Nothing
 
-          forM_ bannedChats $ \banChatId -> do
+          forM_ bannedChats \banChatId -> do
             let unbanReq = defUnbanChatMember (SomeChatId banChatId) userId
             void $ call $ unbanChatMember unbanReq
+
+updateSpamerUsernames :: WithBotState => BotM ()
+updateSpamerUsernames = do
+  let BotState {..} = ?model
+      Settings {..} = botSettings
+
+  forM_ ownerGroup \OwnerGroupSettings {} ->
+    readCache blocklist >>= \b -> forM_ (HM.keys $ spamerBans b) \spamerId -> do
+      mResponse <- call $ getChat (SomeChatId $ coerce @_ @ChatId spamerId)
+      forM_ mResponse \Response{..} -> do
+        let UserInfo{..} = toUserInfo responseResult
+            addUsernameToBlocklist username bl@Blocklist{..} =
+              bl { spamerUsernames = HM.insert username spamerId spamerUsernames }
+        forM_ userInfoUsername \username ->
+          liftIO $! atomically $! modifyTVar' blocklist $! addUsernameToBlocklist username
