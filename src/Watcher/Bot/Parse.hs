@@ -7,6 +7,7 @@ import Data.Foldable (asum)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import Telegram.Bot.API
+import Telegram.Bot.API.Names
 import Telegram.Bot.Simple.UpdateParser
 import Text.Read (readMaybe)
 
@@ -250,8 +251,5 @@ parseSomeChatId txt
   = ((SomeChatId . ChatId) <$> readMaybe @Integer (Text.unpack txt))
   <|> usernameMaybe txt
   where
-    usernameMaybe t =
-      case Text.uncons t of
-        Just ('@', username) -> Just $! SomeChatUsername username
-        _ -> Nothing
+    usernameMaybe t = SomeChatUsername <$> normaliseUsername t
 
