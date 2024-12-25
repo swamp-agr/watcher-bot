@@ -16,7 +16,7 @@ let PrevBanState
     , bannedChats : List Integer
     }
 
-let PrevBlocklist = List (Map Integer PrevBanState)
+let PrevBlocklist = Map Integer PrevBanState
 
 -- ** groups
 
