@@ -262,3 +262,12 @@ groupSetup chatId userId menuId = do
       nextChatSettings = alterSettings (chatSettings chatState) menuId
   overrideChatSettings chatId chatState userId now nextChatSettings
 
+runFixChatTitles :: WithBotState => BotM ()
+runFixChatTitles = do
+  let BotState {..} = ?model
+      Settings{..} = botSettings
+
+  forM_ ownerGroup \OwnerGroupSettings {} ->
+    readCache groups >>= flip forM_ refreshChatAdmins . HM.keys
+
+  replyText "Done"

@@ -112,6 +112,9 @@ handleAction (PublicHelp _chatId messageId) model = model <# do
 handleAction (Dump _message) model = model <# do
   liftIO dumpAllCachesOnce
 
+handleAction FixChatTitles model = model <# do
+  runFixChatTitles
+
 -- | Async action: part of self-destruct mechanics. Bot will delete the message if possible.
 handleAction (DeleteMessage chatId messageId) model = model <# do
   void $ call $ deleteMessage chatId messageId
@@ -121,4 +124,3 @@ handleAction (DeleteMessage chatId messageId) model = model <# do
 handleAction (CheckChatMember chatId user) model = model <# do
   void $ handleCheckChatMember chatId user
   pure ()
-
