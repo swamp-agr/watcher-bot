@@ -9,7 +9,6 @@ import Telegram.Bot.Simple
 import qualified Data.HashSet as HS
 
 import Watcher.Bot.Analytics
-import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
 import Watcher.Bot.Reply
 import Watcher.Bot.Settings
@@ -38,7 +37,7 @@ handleUnbanAction chatId ch adminId messageId someChatId = do
       let c = responseResult chatResponse
           userInfo = chatFullInfoToUserInfo c
           userId = userInfoId userInfo
-      lookupCache blocklist userId >>= \case
+      lookupBlocklist blocklist userId >>= \case
         Nothing -> selfDestructReply chatId ch (ReplyUserHasNotBeenBanned userInfo)
         Just BanState{..} -> if bannedChats `elem` [HS.singleton chatId, HS.empty]
           then do
@@ -49,7 +48,7 @@ handleUnbanAction chatId ch adminId messageId someChatId = do
                   }
             sendEvent evt
             
-            alterCache blocklist userId $! const Nothing
+            alterBlocklist blocklist userInfo $! const Nothing
             let unbanReq = defUnbanChatMember (SomeChatId chatId) userId
             mUnbanResponse <- call $ unbanChatMember unbanReq
             when ((responseResult <$> mUnbanResponse) == Just True) $ 
@@ -84,10 +83,10 @@ handleGlobalUnbanAction messageId someChatId = do
       let c = responseResult chatResponse
           userInfo = chatFullInfoToUserInfo c
           userId = userInfoId userInfo
-      lookupCache blocklist userId >>= \case
+      lookupBlocklist blocklist userId >>= \case
         Nothing -> replyText $ "user not banned: " <> s2t userInfo
         Just BanState {..} -> do
-          alterCache blocklist userId $! const Nothing
+          alterBlocklist blocklist userInfo $! const Nothing
 
           forM_ bannedChats $ \banChatId -> do
             let unbanReq = defUnbanChatMember (SomeChatId banChatId) userId

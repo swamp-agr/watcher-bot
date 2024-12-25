@@ -118,7 +118,7 @@ handleAction (DeleteMessage chatId messageId) model = model <# do
   pure ()
 
 -- | Async action: check user member, if kicked, ban them everywhere too.
-handleAction (CheckChatMember chatId userId) model = model <# do
-  void $ handleCheckChatMember chatId userId
+handleAction (CheckChatMember chatId user) model = model <# do
+  void $ handleCheckChatMember chatId user
   pure ()
 

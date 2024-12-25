@@ -11,6 +11,8 @@ mkdir -p ./log
 # normalise config
 dhall --output ./config/settings.dhall <<< ./config/default.dhall
 
+watcher-bot migration
+
 watcher-bot bot +RTS -A64m -AL256m -qn2 -RTS >> log/watcher-bot.log 2>&1 &
 
 # write PID to file

@@ -25,4 +25,12 @@ Examples:
               → List/fold a xs list (λ(x : a) → cons (f x))
             )
 
-in  map
+    let Map
+        : Type → Type → Type
+        = λ(k : Type) → λ(v : Type) → List { mapKey : k, mapValue : v }
+
+    let Entry
+        : Type → Type → Type
+        = λ(k : Type) → λ(v : Type) → { mapKey : k, mapValue : v }
+
+in  { Map, Entry, map }

@@ -2,7 +2,7 @@ module Watcher.Bot.State where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
-import Control.Concurrent.STM (TVar, newTVarIO)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar')
 import Control.Monad (when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.HashMap.Strict (HashMap)
@@ -33,6 +33,16 @@ import Watcher.Orphans ()
 -- | Telegram Model.
 type Model = BotState
 
+type Groups = HashMap ChatId ChatState
+
+type Admins = HashMap UserId (HashSet (ChatId, Maybe Text))
+
+type Users = HashMap UserId UserState
+
+type SpamMessages = HashMap MessageText Int
+
+type Events = Set TriggeredEvent
+
 data BotState = BotState
   { botSettings :: Settings
   , clientEnv :: ClientEnv
@@ -41,12 +51,12 @@ data BotState = BotState
   , self :: TVar (Maybe UserInfo)
   , logEnv :: LogEnv
   -- caches
-  , groups :: TVar (HashMap ChatId ChatState)
-  , admins :: TVar (HashMap UserId (HashSet (ChatId, Maybe Text)))
-  , users :: TVar (HashMap UserId UserState)
-  , blocklist :: TVar (HashMap UserId BanState)
-  , spamMessages :: TVar (HashMap MessageText Int)
-  , eventSet :: TVar (Set TriggeredEvent)
+  , groups :: TVar Groups
+  , admins :: TVar Admins
+  , users :: TVar Users
+  , blocklist :: TVar Blocklist
+  , spamMessages :: TVar SpamMessages
+  , eventSet :: TVar Events
   }
 
 -- | Bot has its own state
@@ -57,7 +67,7 @@ newBotState settings = do
   clientEnv <- defaultTelegramClientEnv (Token . botToken $ settings)
   groups <- newTVarIO HM.empty
   users <- newTVarIO HM.empty
-  blocklist <- newTVarIO HM.empty
+  blocklist <- newTVarIO newBlocklist
   spamMessages <- newTVarIO HM.empty
   requestLock <- newMVar ()
   eventSet <- newTVarIO Set.empty
@@ -84,6 +94,53 @@ importBotState settings@Settings {..} = do
   eventSet <- importCache eventSetPath
 
   pure $ BotState { botSettings = settings, .. }
+
+data BanState = BanState
+  { bannedMessages :: HashSet MessageText
+  , bannedChats :: HashSet ChatId
+  } deriving (Eq, Show, Generic, FromDhall, ToDhall)
+
+newBanState :: BanState
+newBanState = BanState
+  { bannedMessages = HS.empty
+  , bannedChats = HS.empty
+  }
+
+data Blocklist = Blocklist
+  { spamerBans :: HashMap UserId BanState
+  , spamerUsernames :: HashMap Text UserId
+  }
+  deriving (Eq, Show, Generic, FromDhall, ToDhall)
+
+instance Semigroup Blocklist where
+  a <> b = Blocklist
+    { spamerBans = spamerBans a <> spamerBans b
+    , spamerUsernames = spamerUsernames a <> spamerUsernames b
+    }
+
+instance Monoid Blocklist where
+  mempty = newBlocklist
+
+newBlocklist :: Blocklist
+newBlocklist = Blocklist
+  { spamerBans = HM.empty
+  , spamerUsernames = HM.empty
+  }
+
+alterBlocklist
+  :: MonadIO m => TVar Blocklist -> UserInfo -> (Maybe BanState -> Maybe BanState) -> m ()
+alterBlocklist cache UserInfo{..} modifier =
+  let modifyUsername x = case userInfoUsername of
+        Nothing -> x
+        Just username -> HM.insert username userInfoId x
+      alter b@Blocklist{..} = b
+        { spamerBans = HM.alter modifier userInfoId spamerBans
+        , spamerUsernames = modifyUsername spamerUsernames
+        }
+  in liftIO $! atomically $! modifyTVar' cache $! alter
+
+lookupBlocklist :: MonadIO m => TVar Blocklist -> UserId -> m (Maybe BanState)
+lookupBlocklist cache = lookupCacheWith cache spamerBans
 
 isDebugEnabled :: WithBotState => Bool
 isDebugEnabled = let BotState{..} = ?model in debugEnabled botSettings
@@ -115,19 +172,8 @@ callIO action = do
   wait 1
   pure response
 
-data BanState = BanState
-  { bannedMessages :: HashSet MessageText
-  , bannedChats :: HashSet ChatId
-  } deriving (Eq, Show, Generic, FromDhall, ToDhall)
-
 wait :: Int -> IO ()
 wait = threadDelay . (1_000_000 *)
-
-newBanState :: BanState
-newBanState = BanState
-  { bannedMessages = HS.empty
-  , bannedChats = HS.empty
-  }
 
 data SelfDestructMessage = SelfDestructMessage
   { selfDestructMessageChatId :: ChatId
@@ -141,7 +187,7 @@ instance Ord SelfDestructMessage where
 
 data UserChatMemberCheck = UserChatMemberCheck
   { userChatMemberCheckChatId :: ChatId
-  , userChatMemberCheckUserId :: UserId
+  , userChatMemberCheckUserInfo :: UserInfo
   , userChatMemberCheckTime :: UTCTime
   }
   deriving (Eq, Show, Generic, FromDhall, ToDhall)

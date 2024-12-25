@@ -127,11 +127,12 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
   let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
     let uid = userId newcomer
-    lookupCache blocklist uid >>= \case
+        userInfo = userToUserInfo newcomer
+    lookupBlocklist blocklist uid >>= \case
       Just bs@BanState{..} -> do
         let nextBanState = bs { bannedChats = HS.insert chatId bannedChats }
             spamer = userToUserInfo newcomer
-        writeCache blocklist uid nextBanState
+        alterBlocklist blocklist userInfo $! const $! Just nextBanState
 
         banSpamerInChat chatId spamer
         selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
@@ -143,7 +144,7 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
         let userChatId = SomeChatId $ coerce @_ @ChatId uid
             evt = UserChatMemberCheckEvent $! UserChatMemberCheck
               { userChatMemberCheckChatId = chatId
-              , userChatMemberCheckUserId = uid
+              , userChatMemberCheckUserInfo = userInfo
               , userChatMemberCheckTime = addUTCTime (5 * 60) now
               }
         mResponse <- call $ getChat userChatId

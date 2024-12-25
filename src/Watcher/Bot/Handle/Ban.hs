@@ -184,26 +184,26 @@ updateBlocklistAndMessages chatId MessageInfo{..} = do
     alterCache spamMessages txt (Just . succ . fromMaybe 1)
     case messageInfoFrom of
       Nothing -> pure () -- FIXME: there is a gap between spamers and messages
-      Just UserInfo{userInfoId} -> updateBlocklist chatId userInfoId (Just txt)
+      Just user -> updateBlocklist chatId user (Just txt)
 
 updateBlocklist
-  :: (WithBotState, MonadIO m) => ChatId -> UserId -> Maybe MessageText -> m ()
-updateBlocklist chatId userId mMessage =
+  :: (WithBotState, MonadIO m) => ChatId -> UserInfo -> Maybe MessageText -> m ()
+updateBlocklist chatId user mMessage =
   let BotState{..} = ?model
-      go Nothing = Just $! newBanState
+      goBans Nothing = Just $! newBanState
         { bannedMessages = maybe HS.empty HS.singleton mMessage
         , bannedChats = HS.singleton chatId
         }
-      go (Just hs@BanState{..}) =
+      goBans (Just hs@BanState{..}) =
         Just $! hs
           { bannedMessages = maybe bannedMessages (flip HS.insert bannedMessages) mMessage
           , bannedChats = HS.insert chatId bannedChats
           }
-  in alterCache blocklist userId go
+  in alterBlocklist blocklist user goBans 
 
 hasUserAlreadyBannedElsewhere :: WithBotState => UserId -> BotM Bool
 hasUserAlreadyBannedElsewhere userId =
-  let BotState {..} = ?model in lookupCache blocklist userId >>= pure . isJust
+  let BotState {..} = ?model in lookupBlocklist blocklist userId >>= pure . isJust
 
 proceedWithPoll
   :: WithBotState
@@ -357,7 +357,7 @@ handleBotBanAction
 handleBotBanAction chatId ChatState{..} botUserId bannedMember = do
   let BotState {..} = ?model
   let botIsAdmin' = botUserId `HS.member` chatAdmins
-      spamerId = userId $ chatMemberUser bannedMember
+      spamer = userToUserInfo $ chatMemberUser bannedMember
       go = Just . fromMaybe newBanState
 
   when botIsAdmin' $ do
@@ -366,4 +366,4 @@ handleBotBanAction chatId ChatState{..} botUserId bannedMember = do
           { eventData = Just "by_other_admin_bot" }
     sendEvent evt
 
-    alterCache blocklist spamerId go
+    alterBlocklist blocklist spamer go

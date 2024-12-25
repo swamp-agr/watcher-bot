@@ -27,7 +27,7 @@ processTriggeredEvents fun = forever $! do
               wait $ round sec
               fun (DeleteMessage selfDestructMessageChatId selfDestructMessageId)
         UserChatMemberCheckEvent UserChatMemberCheck{..} -> do
-          let action = CheckChatMember userChatMemberCheckChatId userChatMemberCheckUserId
+          let action = CheckChatMember userChatMemberCheckChatId userChatMemberCheckUserInfo
           if userChatMemberCheckTime < now
             then fun action
             else do
