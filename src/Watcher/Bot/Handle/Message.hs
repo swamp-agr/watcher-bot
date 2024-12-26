@@ -74,11 +74,19 @@ analyseMessage chatId ch userId message = do
       unless (HS.member userId (allowlist ch)) $ do
         forM_ (messageFrom message) $ \spamerUser -> do
           let spamer = userToUserInfo spamerUser
-          updateBlocklistAndMessages chatId messageInfo
+          updateBlocklistAndMessages chatId [] messageInfo
           banSpamerInChat chatId spamer
           removeAllQuarantineMessages ch chatId (SpamerId userId)
           selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
-    else do
+    else callCasCheck userId >>= \case
+    Just messages -> forM_ (messageFrom message) \spamerUser -> do
+      let spamer = userToUserInfo spamerUser
+          texts = MessageText <$> messages
+      updateBlocklistAndMessages chatId texts messageInfo
+      banSpamerInChat chatId spamer
+      removeAllQuarantineMessages ch chatId (SpamerId userId)
+      selfDestructReply chatId ch (ReplyUserCASBanned spamer)      
+    Nothing -> do
       knownSpamMessage <- isKnownSpamMessage messageInfo
       if knownSpamMessage
         then handleBanByRegularUser chatId ch Nothing messageInfo
@@ -135,30 +143,43 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
   newcomersWithChats <- forM newcomers $ \newcomer -> do
     let uid = userId newcomer
         userInfo = userToUserInfo newcomer
+
+        fullBanAction bs@BanState{..} banType messages = do
+          let messageSet = HS.fromList (MessageText <$> messages)
+              nextBanState = bs
+                { bannedChats = HS.insert chatId bannedChats
+                , bannedMessages = HS.union messageSet bannedMessages
+                }
+              spamer = userToUserInfo newcomer
+              spamerId = SpamerId $! userInfoId spamer
+          alterBlocklist blocklist userInfo $! const $! Just nextBanState
+
+          banSpamerInChat chatId spamer
+          removeAllQuarantineMessages ch chatId spamerId
+          selfDestructReply chatId ch (banType spamer)
+
     lookupBlocklist blocklist uid >>= \case
-      Just bs@BanState{..} -> do
-        let nextBanState = bs { bannedChats = HS.insert chatId bannedChats }
-            spamer = userToUserInfo newcomer
-            spamerId = SpamerId $! userInfoId spamer
-        alterBlocklist blocklist userInfo $! const $! Just nextBanState
-
-        banSpamerInChat chatId spamer
-        removeAllQuarantineMessages ch chatId spamerId
-        selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
-
+      Just bs -> do
+        fullBanAction bs ReplyUserAlreadyBanned []
         pure Nothing
 
-      Nothing -> do
-        now <- liftIO getCurrentTime
-        let userChatId = SomeChatId $ coerce @_ @ChatId uid
-            evt = UserChatMemberCheckEvent $! UserChatMemberCheck
-              { userChatMemberCheckChatId = chatId
-              , userChatMemberCheckUserInfo = userInfo
-              , userChatMemberCheckTime = addUTCTime (5 * 60) now
-              }
-        mResponse <- call $ getChat userChatId
-        liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
-        pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
+      Nothing -> callCasCheck uid >>= \case
+
+        Just messages -> do
+          fullBanAction newBanState ReplyUserCASBanned messages
+          pure Nothing
+
+        Nothing -> do
+          now <- liftIO getCurrentTime
+          let userChatId = SomeChatId $ coerce @_ @ChatId uid
+              evt = UserChatMemberCheckEvent $! UserChatMemberCheck
+                { userChatMemberCheckChatId = chatId
+                , userChatMemberCheckUserInfo = userInfo
+                , userChatMemberCheckTime = addUTCTime (5 * 60) now
+                }
+          mResponse <- call $ getChat userChatId
+          liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
+          pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })

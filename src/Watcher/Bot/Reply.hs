@@ -39,6 +39,7 @@ data ReplyAnswerType
   | ReplyUserHasNotBeenBanned { replyUserHasNotBeenBanned :: UserInfo }
   | ReplyUserHasBeenUnbanned { replyUserHasBeenUnbanned :: UserInfo }
   | ReplyUserAlreadyBanned { replyUserAlreadyBanned :: UserInfo }
+  | ReplyUserCASBanned { replyUserCASBanned :: UserInfo }
   | ReplyUserRecovered { replyUserRecovered :: UserInfo }
   | ReplyUnknownUsername { replyUnknownUsername :: Text }
   | ReplyConsensus Int
@@ -58,6 +59,12 @@ renderAnswer = \case
       [ "User "
       , userInfoLink u
       , " has been recognised as a known spammer and been removed from the group."
+      ]
+  ReplyUserCASBanned u ->
+    Text.concat
+      [ "User "
+      , userInfoLink u
+      , " has been CAS banned."
       ]
   ReplyUserRecovered u ->
     Text.concat
