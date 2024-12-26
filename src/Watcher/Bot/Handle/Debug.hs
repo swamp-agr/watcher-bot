@@ -121,7 +121,7 @@ handleGetChatMember chatId = do
       case HM.toList quarantine of
         [] -> reply "No users in quarantine"
         xs -> do
-          texts <- forM xs $ \(userId, (_mChatInfo, messageHashes)) -> do
+          texts <- forM xs $ \(userId, QuarantineState{..}) -> do
             mResponse <- call $ getChatMember (SomeChatId chatId) userId
             let responseToText x =
                   let cm = responseResult x
@@ -132,7 +132,7 @@ handleGetChatMember chatId = do
                 userStatus = Text.concat
                   [ s2t (coerce @_ @Integer userId)
                   , ": ", responseText
-                  , ", ", s2t (length messageHashes)
+                  , ", ", s2t (length quarantineMessageHash)
                   ]
             pure userStatus
           let fullChatResponse = Text.concat

@@ -53,6 +53,8 @@ instance FromDhall v => FromDhall (KeyMap v) where
 instance ToDhall v => ToDhall (KeyMap v) where
   injectWith opts = contramap KeyMap.toHashMapText (injectWith opts)
 
+deriving newtype instance Ord MessageId
+
 deriving newtype instance FromDhall MessageId
 
 deriving newtype instance ToDhall MessageId

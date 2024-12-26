@@ -22,7 +22,7 @@ data ChatState = ChatState
   , chatAdmins :: HashSet UserId
   , chatAdminsCheckedAt :: Maybe Day
   , chatSetup :: SetupState
-  , quarantine :: HashMap UserId (Maybe ChatInfo, Set MessageHash)
+  , quarantine :: HashMap UserId QuarantineState
   , activePolls :: HashMap SpamerId PollState -- ^ key is candidate for ban in given group, value is a set of unique voters in favour of ban and a message with poll.
   , adminCalls :: HashMap SpamerId (UserInfo, MessageInfo)
   , allowlist :: HashSet UserId
@@ -122,3 +122,17 @@ data PollState = PollState
   , pollSpamMessageId :: MessageId
   }
   deriving (Show, Eq, Generic, FromDhall, ToDhall)
+
+data QuarantineState = QuarantineState
+  { quarantineUserChatInfo :: Maybe ChatInfo
+  , quarantineMessageHash :: Set MessageHash
+  , quarantineMessageId :: Set MessageId
+  }
+  deriving (Show, Eq, Generic, FromDhall, ToDhall)
+
+emptyQuarantineState :: QuarantineState
+emptyQuarantineState = QuarantineState
+  { quarantineUserChatInfo = Nothing
+  , quarantineMessageHash = mempty
+  , quarantineMessageId = mempty
+  }
