@@ -56,8 +56,8 @@ handleTuning Update{..} = do
           mResponse <- call $ getChat (SomeChatId userChatId)
           liftIO $ log' ("ChatFullInfo" :: Text, mResponse)
           let mChat = responseResult <$> mResponse
-              ch = (newChatState botSettings)
-                { quarantine = HM.singleton userId' (toChatInfo <$> mChat, Set.empty) }
+              qs = emptyQuarantineState { quarantineUserChatInfo = toChatInfo <$> mChat }
+              ch = (newChatState botSettings) { quarantine = HM.singleton userId' qs }
               decision = decideAboutMessage ch messageOriginUserSenderUser msg
           replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
         _ -> pure ()
@@ -76,6 +76,7 @@ analyseMessage chatId ch userId message = do
           let spamer = userToUserInfo spamerUser
           updateBlocklistAndMessages chatId messageInfo
           banSpamerInChat chatId spamer
+          removeAllQuarantineMessages ch chatId (SpamerId userId)
           selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
     else do
       knownSpamMessage <- isKnownSpamMessage messageInfo
@@ -106,14 +107,20 @@ incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{.
     if enoughToRelease
       then endQuarantineForUser chatId userId
       else do
-        let go Nothing = Just $! (Nothing, Set.singleton hash)
-            go (Just (chat, s)) = Just $! (chat, Set.insert hash s)
+        let go Nothing = Just $! emptyQuarantineState
+              { quarantineMessageHash = Set.singleton hash
+              , quarantineMessageId = Set.singleton messageMessageId
+              }
+            go (Just qs@QuarantineState{..}) = Just $! qs
+              { quarantineMessageHash = Set.insert hash quarantineMessageHash
+              , quarantineMessageId = Set.insert messageMessageId quarantineMessageId
+              }
             nextState = ch { quarantine = HM.alter go userId quarantine }
         writeCache groups chatId nextState
 
 userIsInChatQuarantine :: ChatState -> UserId -> Maybe Int
 userIsInChatQuarantine ChatState{..} userId =
-  HM.lookup userId quarantine >>= pure . Set.size . snd
+  HM.lookup userId quarantine >>= pure . Set.size . quarantineMessageHash
 
 endQuarantineForUser :: (WithBotState, MonadIO m) => ChatId -> UserId -> m ()
 endQuarantineForUser chatId userId = do
@@ -132,9 +139,11 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
       Just bs@BanState{..} -> do
         let nextBanState = bs { bannedChats = HS.insert chatId bannedChats }
             spamer = userToUserInfo newcomer
+            spamerId = SpamerId $! userInfoId spamer
         alterBlocklist blocklist userInfo $! const $! Just nextBanState
 
         banSpamerInChat chatId spamer
+        removeAllQuarantineMessages ch chatId spamerId
         selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
 
         pure Nothing
@@ -151,7 +160,8 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
         liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
         pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
-  let toQuarantineEntry (mChat, User{..}) = (userId, (mChat, Set.empty))
+  let toQuarantineEntry (mChat, User{..}) =
+        (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
       newUserMap = HM.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
       go prev _new = prev -- current strategy: leave previous state, do not flush it
       nextState = ch { quarantine = HM.unionWith go quarantine newUserMap }
@@ -248,7 +258,7 @@ doesNameContainEmoji ChatState{..} = getUserScore go scoreUserNameContainsEmoji
   where
     go :: User -> Bool
     go u =
-      let mChat = fst =<< HM.lookup (userId u) quarantine
+      let mChat = quarantineUserChatInfo =<< HM.lookup (userId u) quarantine
           txt = getUserName u
 
           chatContainsAnyEmoji ChatInfo{..} =
@@ -284,7 +294,7 @@ getUserAdultScore ChatState{..} ScoreSettings{..} u =
         + maybe 0 computeScore chatInfoBio
       
       userScore = computeScore (getUserName u)
-      mChat = fst =<< HM.lookup (userId u) quarantine
+      mChat = quarantineUserChatInfo =<< HM.lookup (userId u) quarantine
       chatScore = maybe 0 getChatScore mChat
   in userScore + chatScore
 
@@ -309,7 +319,9 @@ messageWordsScore ScoreSettings{scoreMessageWordsScore} Message{messageText} =
 
 messageCopyPasteScore :: ScoreSettings -> ChatState -> UserId -> Message -> Int
 messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} = 
-  let messages = fromMaybe Set.empty $! fmap snd $! HM.lookup userId quarantine
+  let messages = fromMaybe Set.empty
+        $! fmap quarantineMessageHash
+        $! HM.lookup userId quarantine
   in if Set.null messages
     then 0
     else let messageExist = fromMaybe False

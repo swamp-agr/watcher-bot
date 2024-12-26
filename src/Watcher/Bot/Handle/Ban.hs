@@ -14,6 +14,7 @@ import Telegram.Bot.Simple
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 
 import Watcher.Bot.Analytics
@@ -61,7 +62,11 @@ handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
           Just (spamer, orig) -> do
             updateBlocklistAndMessages chatId orig
             banSpamerInChat chatId spamer
-            let nextState = ch { adminCalls = HM.delete spamerId adminCalls }
+            removeAllQuarantineMessages ch chatId spamerId
+            let nextState =
+                  ch { adminCalls = HM.delete spamerId adminCalls
+                     , quarantine = HM.delete (coerce @_ @UserId spamerId) quarantine
+                     }
             writeCache groups chatId nextState
             selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
 
@@ -93,6 +98,9 @@ handleBanByAdmin chatId ch@ChatState{..} orig@MessageInfo{..} = do
     forM_ (pollMessageId <$> mPoll) (void . call . deleteMessage chatId)
     closeBanPoll ch chatId spamerId
 
+    -- remove all messages tracked in quarantine
+    removeAllQuarantineMessages ch chatId spamerId
+    
     banSpamerInChat chatId spamer
 
 handleBanByRegularUser
@@ -143,16 +151,17 @@ handleBanViaConsensusPoll
   -> BotM ()
 handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus = do
   let BotState {..} = ?model
+      spamerId = SpamerId $! userInfoId spamer
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere (userInfoId spamer)
   if userAlreadyBanned
     then do
       updateBlocklistAndMessages chatId orig
       banSpamerInChat chatId spamer
+      removeAllQuarantineMessages ch chatId spamerId
       selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
     else do
       botItself <- liftIO $ readTVarIO self
-      let spamerId = SpamerId $! userInfoId spamer
-          mBotId = (VoterId . userInfoId) <$> botItself
+      let mBotId = (VoterId . userInfoId) <$> botItself
           mVoterIdOrBotId = mVoterId <|> mBotId
           voter = if isNothing mVoterIdOrBotId || isJust mBotId
             then BotVoter
@@ -238,6 +247,7 @@ proceedWithPoll ch@ChatState{..} chatId spamerId voterId mOrig (pollChanged, pol
       closeBanPoll ch chatId spamerId
       void $ call $ deleteMessage chatId pollSpamMessageId
       void $ call $ deleteMessage chatId pollMessageId
+      removeAllQuarantineMessages ch chatId spamerId
       selfDestructReply chatId ch (ReplyConsensus voters)
 
 handleVoteBan
@@ -282,6 +292,12 @@ allowUserInGroup st@ChatState{..} chatId userId = do
   let BotState {..} = ?model
   let nextChatState = st { allowlist = HS.insert userId allowlist }
   writeCache groups chatId nextChatState
+
+removeAllQuarantineMessages :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
+removeAllQuarantineMessages ChatState{..} chatId spamerId = do
+  let mQuarantine = HM.lookup (coerce @_ @UserId spamerId) quarantine
+  forM_ mQuarantine \QuarantineState{..} -> 
+    forM_ (Set.toList quarantineMessageId) (void . call . deleteMessage chatId )
 
 createBanPoll
   :: WithBotState
