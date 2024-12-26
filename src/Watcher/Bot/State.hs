@@ -13,6 +13,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
+import Network.HTTP.Client (Manager)
 import Katip
 import Servant.Client (ClientEnv, ClientM, runClientM)
 import System.IO (stdout)
@@ -25,6 +26,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as Text
 
 import Watcher.Bot.Cache
+import Watcher.Bot.Integration.CAS
 import Watcher.Bot.Settings
 import Watcher.Bot.State.Chat
 import Watcher.Bot.State.User
@@ -51,6 +53,7 @@ data BotState = BotState
   , adultEmoji :: HashSet Char
   , self :: TVar (Maybe UserInfo)
   , logEnv :: LogEnv
+  , casClient :: Manager
   -- caches
   , groups :: TVar Groups
   , admins :: TVar Admins
@@ -75,6 +78,7 @@ newBotState settings = do
   let adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji . scores
         $! settings
   self <- newTVarIO Nothing
+  casClient <- newCasClient
   pure BotState { botSettings = settings, .. }
 
 importBotState :: Settings -> IO BotState
@@ -86,6 +90,7 @@ importBotState settings@Settings {..} = do
   requestLock <- newMVar ()
   self <- newTVarIO Nothing
   logEnv <- makeLogEnv
+  casClient <- newCasClient
 
   admins <- importCache adminsPath
   groups <- importCache groupsPath
@@ -175,6 +180,19 @@ callIO action = do
   response <- liftIO (withLock action)
   wait 1
   pure response
+
+callCasCheck :: WithBotState => MonadIO m => UserId -> m (Maybe [Text])
+callCasCheck userId = do
+  let BotState{..} = ?model
+      Settings{..} = botSettings
+
+  eResponse <- liftIO $ checkUser casClient cas userId
+  case eResponse of
+    Left str -> liftIO (log' str) >> pure Nothing
+    Right CasResponse{..} -> pure $
+      if casResponseOk
+        then casResultMessages <$> casResponseResult
+        else Nothing    
 
 wait :: Int -> IO ()
 wait = threadDelay . (1_000_000 *)

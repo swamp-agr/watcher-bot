@@ -70,6 +70,11 @@ data AnalyticsSettings = AnalyticsSettings
   , restEventsPath :: FilePath
   } deriving (Generic, FromDhall, ToDhall, Show)
 
+data CasSettings = CasSettings
+  { casEndpoint :: String
+  , casTimeoutMs :: Natural
+  } deriving (Generic, FromDhall, ToDhall, Show)
+
 data Settings = Settings
   { botName :: Text -- ^ Telegram bot name. Used to parse @/command\@botname@.
   , botToken :: Text -- ^ Bot token.
@@ -81,6 +86,7 @@ data Settings = Settings
   , storage :: StorageSettings
   , analytics :: AnalyticsSettings
   , workers :: WorkersSettings
+  , cas :: CasSettings
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data WorkersSettings = WorkersSettings

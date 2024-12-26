@@ -60,7 +60,7 @@ handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
         case HM.lookup spamerId adminCalls  of
           Nothing -> pure ()
           Just (spamer, orig) -> do
-            updateBlocklistAndMessages chatId orig
+            updateBlocklistAndMessages chatId [] orig
             banSpamerInChat chatId spamer
             removeAllQuarantineMessages ch chatId spamerId
             let nextState =
@@ -88,7 +88,7 @@ handleBanByAdmin chatId ch@ChatState{..} orig@MessageInfo{..} = do
   sendEvent evt
 
   let mSpamerUser = messageInfoFrom
-  updateBlocklistAndMessages chatId orig
+  updateBlocklistAndMessages chatId [] orig
 
   -- according to telegram it should be empty only in channels
   forM_ mSpamerUser \spamer -> do
@@ -155,7 +155,7 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere (userInfoId spamer)
   if userAlreadyBanned
     then do
-      updateBlocklistAndMessages chatId orig
+      updateBlocklistAndMessages chatId [] orig
       banSpamerInChat chatId spamer
       removeAllQuarantineMessages ch chatId spamerId
       selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
@@ -192,8 +192,8 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
 -- 2. add them to list of spam messages.
 -- 3. add spamer to blocklist.
 updateBlocklistAndMessages
-  :: (WithBotState, MonadIO m) => ChatId -> MessageInfo -> m ()
-updateBlocklistAndMessages chatId MessageInfo{..} = do
+  :: (WithBotState, MonadIO m) => ChatId -> [MessageText] -> MessageInfo -> m ()
+updateBlocklistAndMessages chatId extraMessages MessageInfo{..} = do
   let BotState {..} = ?model
   void $ call $ deleteMessage (chatInfoId messageInfoChat) messageInfoId
   forM_ messageInfoText $ \txt' -> do
@@ -201,19 +201,20 @@ updateBlocklistAndMessages chatId MessageInfo{..} = do
     alterCache spamMessages txt (Just . succ . fromMaybe 1)
     case messageInfoFrom of
       Nothing -> pure () -- FIXME: there is a gap between spamers and messages
-      Just user -> updateBlocklist chatId user (Just txt)
+      Just user -> updateBlocklist chatId user (txt : extraMessages)
 
 updateBlocklist
-  :: (WithBotState, MonadIO m) => ChatId -> UserInfo -> Maybe MessageText -> m ()
-updateBlocklist chatId user mMessage =
+  :: (WithBotState, MonadIO m) => ChatId -> UserInfo -> [MessageText] -> m ()
+updateBlocklist chatId user messages =
   let BotState{..} = ?model
+      messageSet = HS.fromList messages
       goBans Nothing = Just $! newBanState
-        { bannedMessages = maybe HS.empty HS.singleton mMessage
+        { bannedMessages = messageSet
         , bannedChats = HS.singleton chatId
         }
       goBans (Just hs@BanState{..}) =
         Just $! hs
-          { bannedMessages = maybe bannedMessages (flip HS.insert bannedMessages) mMessage
+          { bannedMessages = HS.union messageSet bannedMessages
           , bannedChats = HS.insert chatId bannedChats
           }
   in alterBlocklist blocklist user goBans 
@@ -242,7 +243,7 @@ proceedWithPoll ch@ChatState{..} chatId spamerId voterId mOrig (pollChanged, pol
     (False, False) ->
       updateBanPoll ch chatId spamerId voters consensus poll
     (_, True)  -> do
-      forM_ mOrig $! updateBlocklistAndMessages chatId
+      forM_ mOrig $! updateBlocklistAndMessages chatId []
       unlessDebug $! banSpamerInChat chatId pollSpamer
       closeBanPoll ch chatId spamerId
       void $ call $ deleteMessage chatId pollSpamMessageId

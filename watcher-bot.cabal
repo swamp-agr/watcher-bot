@@ -72,6 +72,7 @@ library
                       Watcher.Bot.Handle.Message
                       Watcher.Bot.Handle.Setup
                       Watcher.Bot.Handle.Unban
+                      Watcher.Bot.Integration.CAS
                       Watcher.Bot.ModelChecker
                       Watcher.Bot.Parse
                       Watcher.Bot.Reply
@@ -119,6 +120,8 @@ library
                     , exceptions
                     , filepath
                     , hashable
+                    , http-client
+                    , http-client-tls
                     , katip
                     , mtl
                     , optparse-applicative
