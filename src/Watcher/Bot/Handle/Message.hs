@@ -67,25 +67,22 @@ analyseMessage chatId ch userId message = do
   forM_ (messageNewChatMembers message) $ addToQuarantineOrBan chatId ch
 
   let messageInfo = messageToMessageInfo message
+      fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
+        let spamer = userToUserInfo spamerUser
+        updateBlocklistAndMessages chatId extraMessages messageInfo
+        banSpamerInChat chatId spamer
+        removeAllQuarantineMessages ch chatId (SpamerId userId)
+        selfDestructReply chatId ch (banType spamer)
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere userId
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
     then do
-      unless (HS.member userId (allowlist ch)) $ do
-        forM_ (messageFrom message) $ \spamerUser -> do
-          let spamer = userToUserInfo spamerUser
-          updateBlocklistAndMessages chatId [] messageInfo
-          banSpamerInChat chatId spamer
-          removeAllQuarantineMessages ch chatId (SpamerId userId)
-          selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
+      unless (HS.member userId (allowlist ch)) do
+        fullBan ReplyUserAlreadyBanned []
     else callCasCheck userId >>= \case
-    Just messages -> forM_ (messageFrom message) \spamerUser -> do
-      let spamer = userToUserInfo spamerUser
-          texts = MessageText <$> messages
-      updateBlocklistAndMessages chatId texts messageInfo
-      banSpamerInChat chatId spamer
-      removeAllQuarantineMessages ch chatId (SpamerId userId)
-      selfDestructReply chatId ch (ReplyUserCASBanned spamer)      
+    Just messages -> do
+      let texts = MessageText <$> messages
+      fullBan ReplyUserCASBanned texts
     Nothing -> do
       knownSpamMessage <- isKnownSpamMessage messageInfo
       if knownSpamMessage
