@@ -32,7 +32,7 @@ handleBanAction chatId ch@ChatState{..} voterId messageId orig = do
   void $ call $ deleteMessage chatId messageId
   forwardToOwnersMaybe Spam chatId (messageInfoId orig)
   if coerce @_ @UserId voterId `HS.member` chatAdmins
-    then handleBanByAdmin chatId orig
+    then handleBanByAdmin chatId ch orig
     else handleBanByRegularUser chatId ch (Just voterId) orig
 
 handleAdminBan
@@ -75,8 +75,8 @@ banSpamerInChat chatId spamer = do
   withDebug $! replyText "banChatMember requested"
   unlessDebug $! void $ call $ banChatMember banReq
 
-handleBanByAdmin :: WithBotState => ChatId -> MessageInfo -> BotM ()
-handleBanByAdmin chatId orig@MessageInfo{..} = do
+handleBanByAdmin :: WithBotState => ChatId -> ChatState -> MessageInfo -> BotM ()
+handleBanByAdmin chatId ch@ChatState{..} orig@MessageInfo{..} = do
   now <- liftIO getCurrentTime
   let evt = (chatEvent now chatId EventGroupSpam)
         { eventData = Just "by_admin" }
@@ -84,8 +84,16 @@ handleBanByAdmin chatId orig@MessageInfo{..} = do
 
   let mSpamerUser = messageInfoFrom
   updateBlocklistAndMessages chatId orig
+
   -- according to telegram it should be empty only in channels
-  forM_ mSpamerUser $! banSpamerInChat chatId
+  forM_ mSpamerUser \spamer -> do
+    -- remove poll if exists
+    let spamerId = SpamerId $ userInfoId spamer
+        mPoll = HM.lookup spamerId activePolls
+    forM_ (pollMessageId <$> mPoll) (void . call . deleteMessage chatId)
+    closeBanPoll ch chatId spamerId
+
+    banSpamerInChat chatId spamer
 
 handleBanByRegularUser
   :: WithBotState => ChatId -> ChatState -> Maybe VoterId -> MessageInfo -> BotM ()
