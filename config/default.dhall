@@ -130,4 +130,8 @@ Extra commands:
         , workerPeriodUnits = 4
         }
     }
+, cas =
+    { casEndpoint = "https://api.cas.chat/check?user_id="
+    , casTimeoutMs = 200
+    }
 }
