@@ -113,6 +113,7 @@ library
                     , base16-bytestring
                     , bytestring
                     , cassava
+                    , concurrent-hashtable
                     , containers
                     , cryptohash-sha256
                     , dhall

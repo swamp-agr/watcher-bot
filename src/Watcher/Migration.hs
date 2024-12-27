@@ -52,7 +52,7 @@ migrate = do
       run = runMigration @a recentMigrationPath
 
   run @Admins ("migrateAdmins", adminsPath)
-  run @Blocklist ("migrateBlocklist", blocklistPath)
+  run @BlocklistStorage ("migrateBlocklist", blocklistPath)
   run @Groups ("migrateGroups", groupsPath)
   run @SpamMessages ("migrateSpamMessages", spamMessagesPath)
   run @Users ("migrateUsers", usersPath)
