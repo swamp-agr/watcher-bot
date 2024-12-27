@@ -1,7 +1,6 @@
 module Watcher.Bot.Handle where
 
 import Control.Monad (void)
-import Control.Monad.IO.Class (liftIO)
 import GHC.Stack (HasCallStack)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
@@ -110,7 +109,8 @@ handleAction (PublicHelp _chatId messageId) model = model <# do
   replyMarkdownText messageId (publicHelp . helpSettings . botSettings $ model)
 
 handleAction (Dump _message) model = model <# do
-  liftIO dumpAllCachesOnce
+  dumpAllCachesOnce
+  replyText "Done"
 
 -- | Async action: part of self-destruct mechanics. Bot will delete the message if possible.
 handleAction (DeleteMessage chatId messageId) model = model <# do
