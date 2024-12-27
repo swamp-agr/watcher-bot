@@ -17,6 +17,7 @@ import Telegram.Bot.Simple
 import Telegram.Bot.Simple.BotApp.Internal 
 
 import qualified Data.HashMap.Strict as HM
+import qualified Data.HashTable as CHT
 import qualified Data.Text as Text
 import qualified Options.Applicative as OA
 
@@ -89,11 +90,11 @@ gatherCacheStats title cache = do
   pure $ Text.concat
     [ title, ": ", s2t cacheSize]
 
-gatherBlocklistStats :: TVar Blocklist -> IO Text
-gatherBlocklistStats cache =  do
-  content <- readCacheWith spamerBans cache
+gatherBlocklistStats :: Blocklist -> IO Text
+gatherBlocklistStats Blocklist{..} =  do
+  size <- CHT.readSizeIO blocklistSpamerBans
   pure $ Text.concat
-    [ "Blocklist: " <> s2t (HM.size content) ]
+    [ "Blocklist: " <> s2t size ]
 
 gatherStatistics :: WithBotState => IO ()
 gatherStatistics = every statistics $ do

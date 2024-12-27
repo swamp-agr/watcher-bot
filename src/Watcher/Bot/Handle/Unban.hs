@@ -29,6 +29,7 @@ handleUnbanAction
   -> BotM ()
 handleUnbanAction chatId ch adminId messageId someChatId = do
   let BotState {..} = ?model
+      Blocklist {..} = blocklist
   begin <- liftIO getCurrentTime
   sendEvent (chatEvent begin chatId EventGroupUnban)
   
@@ -37,7 +38,7 @@ handleUnbanAction chatId ch adminId messageId someChatId = do
     mUserId <- case someChatId of
       SomeChatId userChatId -> pure $ Just $ coerce @_ @UserId userChatId
       SomeChatUsername username ->
-        lookupCacheWith blocklist spamerUsernames username >>= \case
+        lookupCache blocklistSpamerUsernames username >>= \case
           Nothing -> do
             selfDestructReply chatId ch (ReplyUnknownUsername username)
             pure Nothing
