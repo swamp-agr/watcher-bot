@@ -73,7 +73,7 @@ handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
 banSpamerInChat :: WithBotState => ChatId -> UserInfo -> BotM ()
 banSpamerInChat chatId spamer = do
   now <- liftIO getCurrentTime
-  sendEvent (chatEvent now chatId EventGroupBan)
+  sendEvent ((chatEvent now chatId EventGroupBan) { eventUserId = Just $ userInfoId spamer })
 
   let banReq = (defBanChatMember (SomeChatId chatId) (userInfoId spamer))
         { banChatMemberRevokeMessages = Just True }

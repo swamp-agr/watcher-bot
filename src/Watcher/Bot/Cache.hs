@@ -89,7 +89,8 @@ cleanCache dir = do
       let fullPath = "." </> "cache" </> dayDir </> dir </> file
       filesize <- getFileSize fullPath
       when (filesize > 0) $ do
-        days <- filter (/= dayDir) <$> listDirectory "cache"
+        -- keep last five days of cache
+        days <- drop 5 . sortOn Down <$> listDirectory "cache"
         let makeCacheDir d = "cache" </> d </> dir
         forM_ days $ \day -> removeDirectoryIfExist (makeCacheDir day)
 

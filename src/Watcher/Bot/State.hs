@@ -106,6 +106,12 @@ data BanState = BanState
   , bannedChats :: HashSet ChatId
   } deriving (Eq, Show, Generic, FromDhall, ToDhall)
 
+instance Semigroup BanState where
+  a <> b = BanState
+    { bannedMessages = HS.union (bannedMessages a) (bannedMessages b)
+    , bannedChats = HS.union (bannedChats a) (bannedChats b)
+    }
+
 newBanState :: BanState
 newBanState = BanState
   { bannedMessages = HS.empty

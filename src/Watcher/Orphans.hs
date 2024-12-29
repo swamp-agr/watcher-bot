@@ -7,11 +7,11 @@
 module Watcher.Orphans where
 
 import Data.Aeson.KeyMap (KeyMap)
-import Data.Csv (ToField (..))
+import Data.Csv (ToField (..), FromField (..))
 import Data.Functor.Contravariant (contramap)
 import Data.Hashable (Hashable)
 import Data.Time
-import Data.Time.Format.ISO8601 (iso8601Show)
+import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 import Data.Time.Clock.POSIX
 import Dhall.Marshal.Decode (FromDhall (..), double, hashMap, strictText)
 import Dhall.Marshal.Encode (Encoder (..), ToDhall (..))
@@ -25,6 +25,8 @@ import qualified Dhall.Core as Core
 deriving newtype instance FromDhall ChatId
 
 deriving newtype instance ToDhall ChatId
+
+deriving newtype instance FromField ChatId
 
 deriving newtype instance ToField ChatId
 
@@ -90,6 +92,8 @@ deriving newtype instance FromDhall UserId
 
 deriving newtype instance ToDhall UserId
 
+deriving newtype instance FromField UserId
+
 deriving newtype instance ToField UserId
 
 deriving instance Eq ChatType
@@ -100,3 +104,6 @@ deriving instance Generic UserId
 
 instance ToField UTCTime where
   toField = BS8.pack . iso8601Show
+
+instance FromField UTCTime where
+  parseField = iso8601ParseM . BS8.unpack
