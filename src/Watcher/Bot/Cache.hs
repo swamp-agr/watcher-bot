@@ -80,6 +80,24 @@ importCache dir = do
       load (Text.pack fullPath)
   newTVarIO (fromMaybe mempty $ join mCache)
 
+compareTwoCaches :: FilePath -> IO (Maybe (Integer, Integer))
+compareTwoCaches dir = do
+  mDayDir <- getLastFilepath "cache"
+  files <- forM mDayDir $ \dayDir -> do
+    let cacheDir = "cache" </> dayDir </> dir
+    doesDirectoryExist cacheDir >>= \case
+      False -> pure []
+      True -> (take 2 . sortOn Down) <$> listDirectory cacheDir
+  case fromMaybe [] files of
+    [] -> pure Nothing
+    x : [] -> do
+      fs <- getFileSize x
+      pure $ Just (0, fs)
+    x : y : _ -> do
+      xs <- getFileSize x
+      ys <- getFileSize y
+      pure $ Just (ys, xs)
+
 cleanCache :: FilePath -> IO ()
 cleanCache dir = do
   mDayDir <- getLastFilepath "cache"
