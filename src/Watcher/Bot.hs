@@ -2,7 +2,7 @@ module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Monad (forever, forM, forM_, join)
+import Control.Monad (forever, forM, forM_, join, unless)
 import Data.IORef (readIORef, newIORef, modifyIORef')
 import Data.Text (Text)
 import GHC.Stack (HasCallStack)
@@ -54,7 +54,11 @@ dumpAllCaches model@BotState{..} = do
   let Settings {..} = botSettings
       WorkersSettings {..} = workers
 
-  every dump dumpAllCachesOnce
+  every dump do
+    dumpAllCachesOnce
+    result <- compareDumps
+    unless (Text.null result) $ replyStats $ "Alert: \n\n" <> result
+
 
 cleanAllCaches :: BotState -> IO ()
 cleanAllCaches model@BotState{..} = do
