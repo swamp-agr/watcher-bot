@@ -87,7 +87,7 @@ compareTwoCaches dir = do
     let cacheDir = "cache" </> dayDir </> dir
     doesDirectoryExist cacheDir >>= \case
       False -> pure []
-      True -> (take 2 . sortOn Down) <$> listDirectory cacheDir
+      True -> (fmap (cacheDir </>) . take 2 . sortOn Down) <$> listDirectory cacheDir
   case fromMaybe [] files of
     [] -> pure Nothing
     x : [] -> do
