@@ -1,7 +1,8 @@
 module Watcher.Bot.Analytics where
 
+import Control.Monad (mzero)
 import Control.Monad.IO.Class (liftIO)
-import Data.Csv (ToRecord (..), ToField (..))
+import Data.Csv (FromRecord (..), FromField (..), ToRecord (..), ToField (..))
 import Data.Text (Text)
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
@@ -31,6 +32,21 @@ data EventType
   | EventUserPrivateCommand
   deriving (Eq, Show, Ord, Generic, FromDhall, ToDhall)
 
+instance FromField EventType where
+  parseField = \case
+    "group_add" -> pure EventGroupAdd
+    "group_setup" -> pure EventGroupSetup
+    "group_setup_completed" -> pure EventGroupSetupCompleted
+    "user_setup" -> pure EventUserSetup
+    "spam" -> pure EventGroupSpam
+    "probably_spam_recognised" -> pure EventGroupRecogniseProbablySpam
+    "most_likely_spam_recognised" -> pure EventGroupRecogniseMostLikelySpam
+    "ban" -> pure EventGroupBan
+    "unban" -> pure EventGroupUnban
+    "leave_unsupported" -> pure EventLeaveUnsupported
+    "private_command" -> pure EventUserPrivateCommand
+    _ -> mzero
+
 instance ToField EventType where
   toField = \case
     EventGroupAdd -> "group_add"
@@ -51,7 +67,7 @@ data Event = Event
   , eventChatId :: Maybe ChatId
   , eventUserId :: Maybe UserId
   , eventData :: Maybe Text
-  } deriving (Eq, Generic, ToRecord)
+  } deriving (Show, Eq, Generic, ToRecord, FromRecord)
 
 event :: UTCTime -> EventType -> Event
 event time evtType = Event time evtType Nothing Nothing Nothing
