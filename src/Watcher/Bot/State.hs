@@ -2,12 +2,11 @@ module Watcher.Bot.State where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
-import Control.Concurrent.STM (TVar, newTVarIO)
-import Control.Monad (forM_, unless, void, when)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar')
+import Control.Monad (when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.HashMap.Strict (HashMap)
 import Data.HashSet (HashSet)
-import Data.HashTable (HashTable)
 import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Text (Text)
@@ -23,7 +22,6 @@ import Telegram.Bot.API.Names
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
-import qualified Data.HashTable as CHT
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 
@@ -60,7 +58,7 @@ data BotState = BotState
   , groups :: TVar Groups
   , admins :: TVar Admins
   , users :: TVar Users
-  , blocklist :: Blocklist
+  , blocklist :: TVar Blocklist
   , spamMessages :: TVar SpamMessages
   , eventSet :: TVar Events
   }
@@ -73,7 +71,7 @@ newBotState settings = do
   clientEnv <- defaultTelegramClientEnv (Token . botToken $ settings)
   groups <- newTVarIO HM.empty
   users <- newTVarIO HM.empty
-  blocklist <- newBlocklist
+  blocklist <- newTVarIO newBlocklist
   spamMessages <- newTVarIO HM.empty
   requestLock <- newMVar ()
   eventSet <- newTVarIO Set.empty
@@ -97,7 +95,7 @@ importBotState settings@Settings {..} = do
   admins <- importCache adminsPath
   groups <- importCache groupsPath
   users <- importCache usersPath
-  blocklist <- importBlocklist blocklistPath
+  blocklist <- importCache blocklistPath
   spamMessages <- importCache spamMessagesPath
   eventSet <- importCache eventSetPath
 
@@ -115,61 +113,43 @@ newBanState = BanState
   }
 
 data Blocklist = Blocklist
-  { blocklistSpamerBans :: HashTable UserId BanState
-  , blocklistSpamerUsernames :: TVar (HashMap Text UserId)
-  }
-
-data BlocklistStorage = BlocklistStorage
   { spamerBans :: HashMap UserId BanState
   , spamerUsernames :: HashMap Text UserId
   }
-  deriving (Show, Generic, FromDhall, ToDhall)
+  deriving (Eq, Show, Generic, FromDhall, ToDhall)
 
-instance Monoid BlocklistStorage where
-  mempty = BlocklistStorage HM.empty HM.empty
-
-instance Semigroup BlocklistStorage where
-  a <> b = BlocklistStorage
+instance Semigroup Blocklist where
+  a <> b = Blocklist
     { spamerBans = spamerBans a <> spamerBans b
     , spamerUsernames = spamerUsernames a <> spamerUsernames b
     }
 
-newBlocklist :: MonadIO m => m Blocklist
-newBlocklist = liftIO do
-  blocklistSpamerBans <- CHT.newWithDefaults 0
-  blocklistSpamerUsernames <- newTVarIO HM.empty
-  pure Blocklist {..}
+instance Monoid Blocklist where
+  mempty = newBlocklist
 
-importBlocklist :: FilePath -> IO Blocklist
-importBlocklist path = storageToBlocklist =<< readCache =<< importCache path
-
-storageToBlocklist :: MonadIO m => BlocklistStorage -> m Blocklist
-storageToBlocklist BlocklistStorage {..} = liftIO do
-  blocklistSpamerBans <- CHT.newWithDefaults (length spamerBans)
-  blocklistSpamerUsernames <- newTVarIO spamerUsernames
-  pure Blocklist {..}
-
-blocklistToStorage :: MonadIO m => Blocklist -> m BlocklistStorage
-blocklistToStorage Blocklist {..} = liftIO do
-  kvs <- CHT.readAssocsIO blocklistSpamerBans
-  let spamerBans = HM.fromList kvs
-  spamerUsernames <- readCache blocklistSpamerUsernames
-  pure BlocklistStorage {..}
+newBlocklist :: Blocklist
+newBlocklist = Blocklist
+  { spamerBans = HM.empty
+  , spamerUsernames = HM.empty
+  }
 
 alterBlocklist
-  :: MonadIO m => Blocklist -> UserInfo -> (Maybe BanState -> Maybe BanState) -> m ()
-alterBlocklist Blocklist{..} UserInfo{..} modifier = do
-  liftIO do
-    mBanState <- CHT.lookup blocklistSpamerBans userInfoId
-    void $ case modifier mBanState of
-      Nothing -> CHT.delete blocklistSpamerBans userInfoId
-      Just v  -> CHT.insert blocklistSpamerBans userInfoId v 
+  :: MonadIO m => TVar Blocklist -> UserInfo -> (Maybe BanState -> Maybe BanState) -> m ()
+alterBlocklist cache UserInfo{..} modifier =
+  let modifyUsername x = case userInfoUsername of
+        Nothing -> x
+        Just username ->
+          let normalUsername = normaliseUsername username
+              insertUsername u = HM.insert u userInfoId x
+          in maybe x insertUsername normalUsername
+      alter b@Blocklist{..} = b
+        { spamerBans = HM.alter modifier userInfoId spamerBans
+        , spamerUsernames = modifyUsername spamerUsernames
+        }
+  in liftIO $! atomically $! modifyTVar' cache $! alter
 
-  forM_ (userInfoUsername >>= normaliseUsername) \username ->
-    writeCache blocklistSpamerUsernames username userInfoId
-
-lookupBlocklist :: MonadIO m => Blocklist -> UserId -> m (Maybe BanState)
-lookupBlocklist Blocklist{..} = liftIO . CHT.lookup blocklistSpamerBans
+lookupBlocklist :: MonadIO m => TVar Blocklist -> UserId -> m (Maybe BanState)
+lookupBlocklist cache = lookupCacheWith cache spamerBans
 
 isDebugEnabled :: WithBotState => Bool
 isDebugEnabled = let BotState{..} = ?model in debugEnabled botSettings

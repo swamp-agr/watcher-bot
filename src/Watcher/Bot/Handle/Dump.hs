@@ -1,6 +1,5 @@
 module Watcher.Bot.Handle.Dump where
 
-import Control.Concurrent.STM (newTVarIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Time (getCurrentTime)
 
@@ -19,8 +18,7 @@ dumpAllCachesOnce = do
     dumpCache now groupsPath groups
     dumpCache now adminsPath admins
     dumpCache now usersPath users
-    blocklistCache <- newTVarIO =<< blocklistToStorage blocklist
-    dumpCache now blocklistPath blocklistCache
+    dumpCache now blocklistPath blocklist
     dumpCache now spamMessagesPath spamMessages
     dumpCache now eventSetPath eventSet
 
