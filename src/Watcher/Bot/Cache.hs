@@ -1,5 +1,6 @@
 module Watcher.Bot.Cache where
 
+import Codec.Compression.Zstd (compress, maxCLevel)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar, newTVarIO)
 import Control.Exception (evaluate)
 import Control.Monad (forM, forM_, join, when)
@@ -11,7 +12,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Time (UTCTime (..))
-import Data.Time.Clock.POSIX (getPOSIXTime)
+import Data.Time.Clock.POSIX (getCurrentTime, getPOSIXTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Dhall (FromDhall (..), ToDhall (..), embed, inject)
 import Dhall.Pretty (prettyExpr)
@@ -21,6 +22,8 @@ import System.Directory
   )
 import System.FilePath ((</>), (<.>))
 
+import qualified Codec.Archive.Tar as Tar
+import qualified Data.ByteString as BS
 import qualified Data.Foldable as Fold
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as Text
@@ -97,6 +100,25 @@ compareTwoCaches dir = do
       xs <- getFileSize x
       ys <- getFileSize y
       pure $ Just (ys, xs)
+
+archiveCache :: FilePath -> IO FilePath
+archiveCache archiveDir = do
+  createDirectoryIfMissing True archiveDir
+
+  days <- (take 5 . sortOn Down) <$> listDirectory "cache"
+  paths <- forM days \day -> do
+    caches <- listDirectory ("cache" </> day)
+    forM caches \cache -> do
+      files <- listDirectory ("cache" </> day </> cache)
+      forM files \file -> pure ("cache" </> day </> cache </> file)
+
+  day <- utctDay <$> getCurrentTime
+  let tarPath = archiveDir </> iso8601Show day <.> "tar"
+      archivePath = tarPath <.> "zst"
+      tarToZst = compress maxCLevel
+  Tar.create tarPath "." (concat $ concat paths)
+  BS.readFile tarPath >>= BS.writeFile archivePath . tarToZst
+  pure archivePath
 
 cleanCache :: FilePath -> IO ()
 cleanCache dir = do

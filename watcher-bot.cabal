@@ -89,6 +89,7 @@ library
                       Watcher.Bot.Types.MessageFrom
                       Watcher.Bot.Types.UserInfo
                       Watcher.Bot.Utils
+                      Watcher.Bot.Worker
                       Watcher.Migration
                       Watcher.Orphans
                       Telegram.Bot.API.Names
@@ -129,12 +130,14 @@ library
                     , safe-exceptions
                     , servant-client
                     , stm
+                    , tar
                     , telegram-bot-api  >= 7.4.4
                     , telegram-bot-simple >= 0.14.3
                     , text
                     , time
                     , unordered-containers
                     , vector
+                    , zstd
 
     -- Directories containing source files.
     hs-source-dirs:   src

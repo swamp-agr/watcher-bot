@@ -6,6 +6,7 @@
 module Watcher.Bot.Settings where
 
 import Data.Map.Strict (Map)
+import Data.Time (TimeOfDay)
 import Dhall
 
 data SpamCommand
@@ -31,6 +32,7 @@ data OwnerGroupSettings = OwnerGroupSettings
   , ownerGroupTuningThreadId :: Integer -- ^ MessageThreadId of tuning topic.
   , ownerGroupFeedbackThreadId :: Integer -- ^ MessageThreadId of feedback topic.
   , ownerGroupStatsThreadId :: Integer -- ^ MessageThreadId of statistics topic.
+  , ownerGroupBackupThreadId :: Integer -- ^ MessageThreadId of topics for backups.
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data ScoreSettings = ScoreSettings
@@ -61,6 +63,7 @@ data StorageSettings = StorageSettings
   , blocklistPath :: FilePath
   , spamMessagesPath :: FilePath
   , eventSetPath :: FilePath
+  , archiveDir :: FilePath
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data AnalyticsSettings = AnalyticsSettings
@@ -99,6 +102,7 @@ data WorkerSettings = WorkerSettings
   { workerName :: Text
   , workerPeriod :: WorkerPeriod
   , workerPeriodUnits :: Natural
+  , workerMode :: Maybe WorkerMode
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data WorkerPeriod = Second | Minute | Hour | Day | Week
@@ -111,6 +115,11 @@ workerPeriodToSec = \case
   Hour -> 60 * 60
   Day -> 60 * 60 * 24
   Week -> 60 * 60 * 24 * 7
+
+data WorkerMode
+  = WorkerRange { workerRangeFrom :: TimeOfDay, workerRangeTo :: TimeOfDay }
+  | WorkerAt { workerAt :: TimeOfDay }
+  deriving (Generic, FromDhall, ToDhall, Show)
 
 -- | Load settings from file.
 loadSettings :: Text -> IO Settings
