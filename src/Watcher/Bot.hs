@@ -2,10 +2,9 @@ module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Monad (forever, forM, forM_, join, unless)
+import Control.Monad (forM, forM_, join, unless)
 import Data.IORef (readIORef, newIORef, modifyIORef')
 import Data.Text (Text)
-import GHC.Stack (HasCallStack)
 import Options.Applicative
   ( auto, execParser, help, helper, info, fullDesc, metavar, long, progDesc
   , option, optional, short
@@ -33,6 +32,7 @@ import Watcher.Bot.State.Chat
 import Watcher.Bot.Types
 import Watcher.Bot.Trigger
 import Watcher.Bot.Utils
+import Watcher.Bot.Worker
 import Watcher.Migration
 import Watcher.Orphans ()
 
@@ -67,17 +67,11 @@ cleanAllCaches model@BotState{..} = do
       StorageSettings {..} = storage
       WorkersSettings {..} = workers
 
-  wait (60 * 60)
-  every cleanup $ mapM_ cleanCache
-    [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, eventSetPath ]
+  every cleanup $ do
+    archiveCache archiveDir >>= replyBackup
 
-every :: WithBotState => HasCallStack => WorkerSettings -> IO () -> IO ()
-every WorkerSettings{..} action = do
-  logT $ "Start worker: " <> workerName
-  forever $ do
-    logT $ "Run worker: " <> workerName
-    action
-    wait (fromIntegral workerPeriodUnits * workerPeriodToSec workerPeriod)
+    mapM_ cleanCache
+      [ groupsPath, adminsPath, usersPath, blocklistPath, spamMessagesPath, eventSetPath ]
 
 getSelf :: WithBotState => IO ()
 getSelf = do

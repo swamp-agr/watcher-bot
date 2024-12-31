@@ -302,7 +302,7 @@ setupReply setupMessageId editMsg = do
                   go (Just st) = Just $! setSetupMessageUserState st menuMessageId
               alterCache users userId go
 
-replyDone :: WithBotState => HasCallStack => SetupMessageId -> BotM ()
+replyDone :: (WithBotState, HasCallStack) => SetupMessageId -> BotM ()
 replyDone messageId = do
   let editMsg = (toEditMessage "Setup completed.")
   setupReply messageId editMsg
@@ -310,9 +310,25 @@ replyDone messageId = do
 replyStats :: WithBotState => Text -> IO ()
 replyStats txt = do
   let BotState{botSettings} = ?model
-  let Settings {..} = botSettings
+      Settings {..} = botSettings
+
   forM_ ownerGroup $ \OwnerGroupSettings{..} -> do
     let messageReq = (defSendMessage (SomeChatId $ ChatId ownerGroupId) txt)
           { sendMessageMessageThreadId = Just $! MessageThreadId ownerGroupStatsThreadId
           }
     void $ callIO $ sendMessage messageReq
+
+replyBackup :: (WithBotState, HasCallStack) => FilePath -> IO ()
+replyBackup backup = do
+  let BotState{..} = ?model
+      Settings{..} = botSettings
+
+  forM_ ownerGroup \OwnerGroupSettings{..} -> do
+    let ctype = "application/zstd"
+        file = DocumentFile backup ctype
+        chatId = SomeChatId $ ChatId ownerGroupId
+        doc = (defSendDocument chatId file)
+          { sendDocumentMessageThreadId = Just $ MessageThreadId ownerGroupBackupThreadId
+          }
+    void $ callIO $ sendDocument doc
+

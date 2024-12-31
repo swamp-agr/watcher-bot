@@ -6,6 +6,7 @@ let OwnerGroup =
       , ownerGroupTuningThreadId : Integer
       , ownerGroupFeedbackThreadId : Integer
       , ownerGroupStatsThreadId : Integer
+      , ownerGroupBackupThreadId : Integer
       }
 let SpamCommandAction = < SCPoll | SCAdminsCall >
 let ScoreSettings =
@@ -44,6 +45,10 @@ let _adminHelp =
   *Tip*: you can include your feedback right after the command in that same message\.
     ''
 let WorkerPeriod = < Second | Minute | Hour | Day | Week >
+let WorkerMode =
+  < WorkerRange : { workerRangeFrom : Time, workerRangeTo : Time }
+  | WorkerAt : { workerAt : Time }
+  >
 in
 { botName = env:WATCHER_BOT_NAME as Text
 , botToken = env:WATCHER_BOT_TOKEN as Text
@@ -53,6 +58,7 @@ in
          , ownerGroupTuningThreadId = +4
          , ownerGroupFeedbackThreadId = +3
          , ownerGroupStatsThreadId = +5
+         , ownerGroupBackupThreadId = +1626
          } 
 , debugEnabled = False
 , defaultGroupSettings =
@@ -106,6 +112,7 @@ Extra commands:
     , blocklistPath = "blocklist"
     , spamMessagesPath = "spam_messages"
     , eventSetPath = "triggered_events"
+    , archiveDir = "backups"
     }
 , analytics =
     { analyticsDir = "./bigdata"
@@ -118,16 +125,22 @@ Extra commands:
         { workerName = "cleanup"
         , workerPeriod = WorkerPeriod.Day
         , workerPeriodUnits = 1
+        , workerMode = Some (WorkerMode.WorkerAt { workerAt = 01:00:00 })
         }
     , dump =
         { workerName = "dump"
         , workerPeriod = WorkerPeriod.Hour
         , workerPeriodUnits = 2
+        , workerMode = None WorkerMode
         }
     , statistics =
         { workerName = "statistics"
         , workerPeriod = WorkerPeriod.Hour
         , workerPeriodUnits = 4
+        , workerMode = Some (WorkerMode.WorkerRange
+            { workerRangeFrom = 07:00:00
+            , workerRangeTo = 23:59:59
+            })
         }
     }
 , cas =

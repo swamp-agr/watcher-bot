@@ -231,7 +231,7 @@ handleMessage settings@Settings{..} upd@Update{..}
             then if isJust $ messageReplyToMessage msg
               then Just $! ContactUser msg
               else Nothing
-            else Nothing
+            else Just $! Debug upd
         DirectMessage userId  -> Just $! CheckUserContactState userId msg
         PublicGroup chatId userId -> if debugEnabled
           then Just $! Debug upd
