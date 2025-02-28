@@ -74,7 +74,8 @@ data AnalyticsSettings = AnalyticsSettings
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data CasSettings = CasSettings
-  { casEndpoint :: String
+  { casEnabled :: Bool
+  , casEndpoint :: String
   , casTimeoutMs :: Natural
   } deriving (Generic, FromDhall, ToDhall, Show)
 

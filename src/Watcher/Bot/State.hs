@@ -192,13 +192,16 @@ callCasCheck userId = do
   let BotState{..} = ?model
       Settings{..} = botSettings
 
-  eResponse <- liftIO $ checkUser casClient cas userId
-  case eResponse of
-    Left str -> liftIO (log' str) >> pure Nothing
-    Right CasResponse{..} -> pure $
-      if casResponseOk
-        then casResultMessages <$> casResponseResult
-        else Nothing    
+  if not (casEnabled cas)
+    then pure Nothing
+    else do
+      eResponse <- liftIO $ checkUser casClient cas userId
+      case eResponse of
+        Left str -> liftIO (log' str) >> pure Nothing
+        Right CasResponse{..} -> pure $
+          if casResponseOk
+            then casResultMessages <$> casResponseResult
+            else Nothing  
 
 wait :: Int -> IO ()
 wait = threadDelay . (1_000_000 *)
