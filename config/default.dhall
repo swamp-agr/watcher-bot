@@ -144,7 +144,8 @@ Extra commands:
         }
     }
 , cas =
-    { casEndpoint = "https://api.cas.chat/check?user_id="
+    { casEnabled = False
+    , casEndpoint = "https://api.cas.chat/check?user_id="
     , casTimeoutMs = 200
     }
 }
