@@ -64,7 +64,7 @@ handleTuning Update{..} = do
 
 analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> BotM ()
 analyseMessage chatId ch userId message = do
-  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan chatId ch
+  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan chatId ch message
 
   let messageInfo = messageToMessageInfo message
       fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
@@ -134,8 +134,8 @@ endQuarantineForUser chatId userId = do
       go (Just ch@ChatState{..}) = Just $! ch { quarantine = HM.delete userId quarantine }
   alterCache groups chatId go
 
-addToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> [User] -> BotM ()
-addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
+addToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
+addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
   let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
     let uid = userId newcomer
@@ -168,15 +168,30 @@ addToQuarantineOrBan chatId ch@ChatState{..} newcomers = do
 
         Nothing -> do
           now <- liftIO getCurrentTime
-          let userChatId = SomeChatId $ coerce @_ @ChatId uid
-              evt = UserChatMemberCheckEvent $! UserChatMemberCheck
-                { userChatMemberCheckChatId = chatId
-                , userChatMemberCheckUserInfo = userInfo
-                , userChatMemberCheckTime = addUTCTime (5 * 60) now
-                }
-          mResponse <- call $ getChat userChatId
-          liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
-          pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
+          userIsSpammer <- case decideAboutMessage ch newcomer message of
+            RegularMessage _ -> pure False
+            ProbablySpamMessage _ -> do
+              sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
+              forwardToOwnersMaybe Spam chatId (messageMessageId message)
+              handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+              pure True
+            MostLikelySpamMessage _ -> do
+              sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+              forwardToOwnersMaybe Spam chatId (messageMessageId message)
+              handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+              pure True
+          case userIsSpammer of
+            True -> pure Nothing
+            False -> do
+              let userChatId = SomeChatId $ coerce @_ @ChatId uid
+                  evt = UserChatMemberCheckEvent $! UserChatMemberCheck
+                    { userChatMemberCheckChatId = chatId
+                    , userChatMemberCheckUserInfo = userInfo
+                    , userChatMemberCheckTime = addUTCTime (5 * 60) now
+                    }
+              mResponse <- call $ getChat userChatId
+              liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
+              pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
@@ -196,6 +211,7 @@ data UserMessageScore = UserMessageScore
   , userMessageScoreRichMarkup :: Int
   , userMessageScoreWords :: Map Text Int
   , userMessageScoreCopyPaste :: Int
+  , userMessageScoreUsernameWords :: Map Text Int
   }
   deriving (Eq, Show)
 
@@ -209,6 +225,7 @@ userMessageScoreToText ums@UserMessageScore{..} = Text.unlines
   , wrap "Rich markup in message" userMessageScoreRichMarkup
   , wrapMap "Words" (Map.toList userMessageScoreWords)
   , wrap "Copy Paste" userMessageScoreCopyPaste
+  , wrapMap "Username words" (Map.toList userMessageScoreUsernameWords)
   , ""
   , wrap "Total score" (getTotalScore ums)
   ]
@@ -229,7 +246,7 @@ getTotalScore UserMessageScore{..} = sum $
   , userMessageScoreKnownName
   , userMessageScoreRichMarkup
   , userMessageScoreCopyPaste
-  ] <> Map.elems userMessageScoreWords
+  ] <> Map.elems userMessageScoreWords <> Map.elems userMessageScoreUsernameWords
 
 data MessageDecision
   = RegularMessage UserMessageScore
@@ -323,9 +340,12 @@ messageContainsRichMarkup ScoreSettings{..}
   . filter ((== MessageEntityCustomEmoji) . messageEntityType)
   . fromMaybe [] . messageEntities
 
--- FIXME: use duckling
 messageWordsScore :: ScoreSettings -> Message -> Map Text Int
-messageWordsScore ScoreSettings{scoreMessageWordsScore} Message{messageText} =
+messageWordsScore score = textWordsScore score . fromMaybe "" . messageText
+
+-- FIXME: use duckling
+textWordsScore :: ScoreSettings -> Text -> Map Text Int
+textWordsScore ScoreSettings{scoreMessageWordsScore} txt =
   let go wordMap word = ((word, ) . fromIntegral) <$> Map.lookup word wordMap
   
       getTotalWordsScore =
@@ -333,7 +353,10 @@ messageWordsScore ScoreSettings{scoreMessageWordsScore} Message{messageText} =
         . catMaybes
         . fmap (go scoreMessageWordsScore . Text.toLower)
         . Text.words
-  in getTotalWordsScore $! fromMaybe "" messageText
+  in getTotalWordsScore $! txt
+
+messageUsernameWordsScore :: ScoreSettings -> User -> Map Text Int
+messageUsernameWordsScore score = textWordsScore score . getUserName
 
 messageCopyPasteScore :: ScoreSettings -> ChatState -> UserId -> Message -> Int
 messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} = 
@@ -363,6 +386,7 @@ decideAboutMessage ch user@User{userId} msg =
         , userMessageScoreRichMarkup = messageContainsRichMarkup scores msg
         , userMessageScoreWords = messageWordsScore scores msg
         , userMessageScoreCopyPaste = messageCopyPasteScore scores ch userId msg
+        , userMessageScoreUsernameWords = messageUsernameWordsScore scores user
         }
       totalScore = getTotalScore userMessageScore
 
