@@ -23,6 +23,7 @@ updateToAction settings@Settings{..} update
   --   groups 
   | isCommand "spam" update = handleBan settings update
   | isCommand "s" update = handleBan settings update
+  | isCommand "пнх" update = handleBan settings update
   | isCommand "undo" update = handleUnban settings update
   | isCommand "u" update = handleUnban settings update
 
