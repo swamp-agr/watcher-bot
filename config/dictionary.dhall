@@ -62,5 +62,7 @@
 , { mapKey = "bybit", mapValue = 400 }
 , { mapKey = "usd", mapValue = 300 }
 , { mapKey = "eur", mapValue = 300 }
+, { mapKey = "детское", mapValue = 100 }
 , { mapKey = "доллар", mapValue = 300 }
+, { mapKey = "порно", mapValue = 1000 }
 ]
