@@ -250,9 +250,11 @@ replyQuarantineRoot messageId = do
         { inlineKeyboardMarkupInlineKeyboard = makeButton <$> [ 1 .. 5 ] }
       msg = Text.unlines
         [ "Set up quarantine mode for every user bot is listening to."
-        , "Once group setup has finished, bot will start to monitor all users' messages."
-        , "This setting is about amount of messages to watch. "
+        , "In quarantine mode the bot is checking user's messages to determine if they are spam or not."
+        , "This setting is about amount of messages to watch."
+        , "Every new user enters the quarantine mode. After the bot is set up for the first time in a group, it will monitor all users' messages."
         , "Once limit is reached, user is no longer in \"quarantine\"."
+        , "Quarantine mode does not restrict users from sending messages."
         ]
       editMsg = (toEditMessage msg)
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup keyboard
