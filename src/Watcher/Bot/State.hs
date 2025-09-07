@@ -3,8 +3,10 @@ module Watcher.Bot.State where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar')
+import Control.Exception (fromException)
 import Control.Monad (when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Coerce (coerce)
 import Data.HashMap.Strict (HashMap)
 import Data.HashSet (HashSet)
 import Data.Ord (comparing)
@@ -13,9 +15,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
-import Network.HTTP.Client (Manager)
+import Network.HTTP.Client (Manager, HttpException(..), HttpExceptionContent(..))
 import Katip
-import Servant.Client (ClientEnv, ClientM, runClientM)
+import Servant.Client (ClientEnv, ClientError (..), ClientM, runClientM)
 import System.IO (stdout)
 import Telegram.Bot.API
 import Telegram.Bot.API.Names
@@ -166,25 +168,61 @@ unlessDebug action = unless isDebugEnabled $! action
 withDebug :: (WithBotState, Monad m) => m () -> m ()
 withDebug action = when isDebugEnabled $! action
 
-withLock :: WithBotState => (Show a, MonadIO m) => ClientM a -> m (Maybe a)
+withLock
+  :: forall m a b. (WithBotState, Show a, MonadIO m, a ~ Response b)
+  => ClientM a -> m (Maybe a)
 withLock action = liftIO $ do
   let BotState{clientEnv, requestLock} = ?model
+
+      retryActionResponse retries
+        | retries <= 1 = do
+            log' @String "Too many retries"
+            runClientM action clientEnv
+        | otherwise = do
+            runClientM action clientEnv >>= \case
+              Left err -> case err of
+                ConnectionError exc -> case fromException exc of
+                  -- Underlying http-client fails to establish connection
+                  Just (HttpExceptionRequest _req ConnectionTimeout) -> do
+                    log' $ concat
+                      [ "connection timeout. ", show retries, " retries left."]
+                    wait 1
+                    retryActionResponse (pred retries)
+                  _ -> log' err >> pure (Left err)
+                _ -> log' err >> pure (Left err)
+              Right result -> do
+                if (responseOk result)
+                  then pure (Right result)
+                  else do
+                    -- we're inspecting something similar to "429 too many requests",
+                    -- telegram will tell how long to wait before trying again
+                    let mTimeoutSec = responseParameters result
+                          >>= responseParametersRetryAfter
+                    case mTimeoutSec of
+                      Nothing -> pure (Right result)
+                      Just timeoutSec -> do
+                        log' $ concat
+                          [ "Telegram respond us with retry_after "
+                          , show timeoutSec
+                          , " seconds. ", show retries
+                          , " retries left."
+                          ]
+                        wait $ coerce timeoutSec
+                        retryActionResponse (pred retries)
+
   takeMVar requestLock
-  eResult <- flip runClientM clientEnv action
-  case eResult of
-    Left err -> log' err
-    _ -> pure ()
+  eResult <- retryActionResponse (10 :: Int)
   let mResult = either (const Nothing) Just eResult
   putMVar requestLock ()
   pure mResult
 
-call :: WithBotState => (MonadIO m, Show a) => ClientM a -> m (Maybe a)
+call :: WithBotState => (MonadIO m, Show a, a ~ Response b) => ClientM a -> m (Maybe a)
 call = liftIO . callIO
 
-callIO :: WithBotState => Show a => ClientM a -> IO (Maybe a)
+callIO :: (WithBotState, Show a, a ~ Response b) => ClientM a -> IO (Maybe a)
 callIO action = do
   response <- liftIO (withLock action)
-  wait 1
+  waitMs 400
   pure response
 
 callCasCheck :: WithBotState => MonadIO m => UserId -> m (Maybe [Text])
@@ -205,6 +243,9 @@ callCasCheck userId = do
 
 wait :: Int -> IO ()
 wait = threadDelay . (1_000_000 *)
+
+waitMs :: Int -> IO ()
+waitMs = threadDelay . (1_000 *)
 
 data SelfDestructMessage = SelfDestructMessage
   { selfDestructMessageChatId :: ChatId
