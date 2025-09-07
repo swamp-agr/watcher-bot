@@ -8,7 +8,5 @@ WATCHER_BOT_PID=$(ps aux | grep 'watcher-bot bot' | grep -v grep | awk '{print $
 # test if process is running.
 if ! [ -n "$WATCHER_BOT_PID" ];
 then
-    . ./scripts/stop.sh
-    sleep 5;
-    . ./scripts/start.sh
+    cd ~/git/watcher-bot &&  ./scripts/start.sh &
 fi
