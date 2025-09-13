@@ -1,5 +1,14 @@
 let Map = https://prelude.dhall-lang.org/Map/Type
 let Map/empty = https://prelude.dhall-lang.org/Map/empty
+let Communication =
+      < LongPolling
+      | Webhook
+        : { webhookCertPath : Text
+          , webhookKeyPath : Text
+          , webhookPort : Natural
+          , webhookHost : Text
+          }
+      >
 let OwnerGroup =
       { ownerGroupId : Integer
       , ownerGroupSpamThreadId : Integer
@@ -148,4 +157,5 @@ Extra commands:
     , casEndpoint = "https://api.cas.chat/check?user_id="
     , casTimeoutMs = 200
     }
+, communication = Communication.LongPolling
 }

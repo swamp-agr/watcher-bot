@@ -137,6 +137,8 @@ library
                     , time
                     , unordered-containers
                     , vector
+                    , warp
+                    , warp-tls
                     , zstd
 
     -- Directories containing source files.

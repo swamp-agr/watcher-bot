@@ -9,6 +9,18 @@ import Data.Map.Strict (Map)
 import Data.Time (TimeOfDay)
 import Dhall
 
+data WebhookSettings = WebhookSettings
+  { webhookCertPath :: FilePath
+  , webhookKeyPath :: FilePath
+  , webhookPort :: Natural
+  , webhookHost :: Text
+  } deriving (Eq, Show, Read, Generic, FromDhall, ToDhall)
+
+data Communication
+  = LongPolling
+  | Webhook WebhookSettings
+  deriving (Eq, Show, Read, Generic, FromDhall, ToDhall)
+
 data SpamCommand
   = SCPoll
   | SCAdminsCall
@@ -91,6 +103,7 @@ data Settings = Settings
   , analytics :: AnalyticsSettings
   , workers :: WorkersSettings
   , cas :: CasSettings
+  , communication :: Communication
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data WorkersSettings = WorkersSettings
