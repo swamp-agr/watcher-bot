@@ -2,17 +2,22 @@ module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Monad (forM, forM_, join, unless)
+import Control.Exception (finally)
+import Control.Monad (forM, forM_, join, void, unless)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (readIORef, newIORef, modifyIORef')
 import Data.Text (Text)
+import Network.Wai.Handler.Warp (defaultSettings, setPort)
+import Network.Wai.Handler.WarpTLS (runTLS, tlsSettings)
 import Options.Applicative
   ( auto, execParser, help, helper, info, fullDesc, metavar, long, progDesc
   , option, optional, short
   , strOption, subparser, (<**>)
   )
-import Servant.Client (ClientEnv)
+import Servant.Client (ClientEnv, runClientM)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
+import Telegram.Bot.Simple.Webhook
 import Telegram.Bot.Simple.BotApp.Internal 
 
 import qualified Data.HashMap.Strict as HM
@@ -159,7 +164,40 @@ autoban = do
 runTelegramBot :: Model -> IO ()
 runTelegramBot st@BotState{..} = do
   let ?model = st
-  botActionFun <- startBotAsync watcherBot clientEnv
+  let Settings{..} = botSettings
+      startBot' = case communication of
+        LongPolling -> startBotAsync
+        Webhook webhookCfg -> startBotWebhookAsync' webhookCfg
+
+      startWebhookAsync bot WebhookConfig{..} env = do
+        botEnv <- startBotEnv bot env
+        setUpWebhook webhookConfigSetWebhookRequest env >>= \case
+          Left err -> error $ show err
+          Right _ -> fork_ $ do
+            liftIO $ runTLS webhookConfigTlsSettings webhookConfigTlsWarpSettings (webhookApp bot botEnv)
+              `finally` deleteWebhook env
+        return (issueAction botEnv Nothing . Just)
+          where
+            fork_ = void . asyncLink . void . flip runClientM env
+
+      startBotWebhookAsync' WebhookSettings{..} bot env = do
+        let tls = (tlsSettings webhookCertPath webhookKeyPath)
+            warpSettings = setPort (fromIntegral webhookPort) defaultSettings
+            url = concat [Text.unpack webhookHost, ":", show webhookPort]
+            requestData = (defSetWebhook url)
+              { setWebhookCertificate = Just
+                  $ InputFile webhookCertPath "application/x-pem-file"
+              , setWebhookAllowedUpdates = Nothing -- defaults for now
+              }
+              -- { onInsecure = AllowInsecure }
+            cfg = WebhookConfig
+              { webhookConfigTlsSettings = tls
+              , webhookConfigTlsWarpSettings = warpSettings
+              , webhookConfigSetWebhookRequest = requestData
+              }
+        startWebhookAsync bot cfg env
+
+  botActionFun <- startBot' watcherBot clientEnv
   runConcurrently $
     Concurrently (processTriggeredEvents botActionFun) <*
     Concurrently (cleanAllCaches st) <*

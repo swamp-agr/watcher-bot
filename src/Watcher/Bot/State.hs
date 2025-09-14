@@ -15,9 +15,13 @@ import Data.Text (Text)
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
-import Network.HTTP.Client (Manager, HttpException(..), HttpExceptionContent(..))
+import Network.HTTP.Client
+  ( Manager, HttpException(..), HttpExceptionContent(..)
+  , managerResponseTimeout, newManager, responseTimeoutMicro
+  )
+import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Katip
-import Servant.Client (ClientEnv, ClientError (..), ClientM, runClientM)
+import Servant.Client (ClientEnv, ClientError (..), ClientM, mkClientEnv, runClientM)
 import System.IO (stdout)
 import Telegram.Bot.API
 import Telegram.Bot.API.Names
@@ -67,18 +71,17 @@ data BotState = BotState
 
 -- | Bot has its own state
 newBotState :: Settings -> IO BotState
-newBotState settings = do
+newBotState settings@Settings{..} = do
   logEnv <- makeLogEnv
   admins <- newTVarIO HM.empty
-  clientEnv <- defaultTelegramClientEnv (Token . botToken $ settings)
+  clientEnv <- createTelegramClientEnv (Token botToken) (fromIntegral botResponseTimeout)
   groups <- newTVarIO HM.empty
   users <- newTVarIO HM.empty
   blocklist <- newTVarIO newBlocklist
   spamMessages <- newTVarIO HM.empty
   requestLock <- newMVar ()
   eventSet <- newTVarIO Set.empty
-  let adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji . scores
-        $! settings
+  let adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
   self <- newTVarIO Nothing
   casClient <- newCasClient
   pure BotState { botSettings = settings, .. }
@@ -88,7 +91,7 @@ importBotState settings@Settings {..} = do
   let StorageSettings {..} = storage
       adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
 
-  clientEnv <- defaultTelegramClientEnv (Token botToken)
+  clientEnv <- createTelegramClientEnv (Token botToken) (fromIntegral botResponseTimeout)
   requestLock <- newMVar ()
   self <- newTVarIO Nothing
   logEnv <- makeLogEnv
@@ -102,6 +105,13 @@ importBotState settings@Settings {..} = do
   eventSet <- importCache eventSetPath
 
   pure $ BotState { botSettings = settings, .. }
+
+createTelegramClientEnv :: Token -> Int -> IO ClientEnv
+createTelegramClientEnv token timeoutSec =
+  let respTimeout = responseTimeoutMicro (timeoutSec * 1_000_000)
+  in mkClientEnv
+     <$> newManager (tlsManagerSettings { managerResponseTimeout = respTimeout })
+     <*> pure (botBaseUrl token)
 
 data BanState = BanState
   { bannedMessages :: HashSet MessageText

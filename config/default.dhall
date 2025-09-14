@@ -1,5 +1,14 @@
 let Map = https://prelude.dhall-lang.org/Map/Type
 let Map/empty = https://prelude.dhall-lang.org/Map/empty
+let Communication =
+      < LongPolling
+      | Webhook
+        : { webhookCertPath : Text
+          , webhookKeyPath : Text
+          , webhookPort : Natural
+          , webhookHost : Text
+          }
+      >
 let OwnerGroup =
       { ownerGroupId : Integer
       , ownerGroupSpamThreadId : Integer
@@ -51,6 +60,7 @@ let WorkerMode =
   >
 in
 { botName = env:WATCHER_BOT_NAME as Text
+, botResponseTimeout = 60
 , botToken = env:WATCHER_BOT_TOKEN as Text
 , ownerGroup =
     Some { ownerGroupId = env:WATCHER_BOT_OWNER_GROUP
@@ -147,5 +157,11 @@ Extra commands:
     { casEnabled = False
     , casEndpoint = "https://api.cas.chat/check?user_id="
     , casTimeoutMs = 200
+    }
+, communication = Communication.Webhook
+    { webhookCertPath = env:WATCHER_BOT_CERT_PATH as Text
+    , webhookHost = env:WATCHER_BOT_WEBHOOK_HOST as Text
+    , webhookPort = env:WATCHER_BOT_WEBHOOK_PORT
+    , webhookKeyPath = env:WATCHER_BOT_KEY_PATH as Text
     }
 }

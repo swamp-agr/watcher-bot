@@ -9,6 +9,18 @@ import Data.Map.Strict (Map)
 import Data.Time (TimeOfDay)
 import Dhall
 
+data WebhookSettings = WebhookSettings
+  { webhookCertPath :: FilePath
+  , webhookKeyPath :: FilePath
+  , webhookPort :: Natural
+  , webhookHost :: Text
+  } deriving (Eq, Show, Read, Generic, FromDhall, ToDhall)
+
+data Communication
+  = LongPolling
+  | Webhook WebhookSettings
+  deriving (Eq, Show, Read, Generic, FromDhall, ToDhall)
+
 data SpamCommand
   = SCPoll
   | SCAdminsCall
@@ -81,6 +93,7 @@ data CasSettings = CasSettings
 
 data Settings = Settings
   { botName :: Text -- ^ Telegram bot name. Used to parse @/command\@botname@.
+  , botResponseTimeout :: Natural -- ^ Response timeout for API requests in seconds.
   , botToken :: Text -- ^ Bot token.
   , ownerGroup :: Maybe OwnerGroupSettings -- ^ Optional, super-admin group settings.
   , debugEnabled :: Bool -- ^ Whether debug enabled or not
@@ -91,6 +104,7 @@ data Settings = Settings
   , analytics :: AnalyticsSettings
   , workers :: WorkersSettings
   , cas :: CasSettings
+  , communication :: Communication
   } deriving (Generic, FromDhall, ToDhall, Show)
 
 data WorkersSettings = WorkersSettings
