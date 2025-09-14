@@ -157,5 +157,10 @@ Extra commands:
     , casEndpoint = "https://api.cas.chat/check?user_id="
     , casTimeoutMs = 200
     }
-, communication = Communication.LongPolling
+, communication = Communication.Webhook
+    { webhookCertPath = env:WATCHER_BOT_CERT_PATH
+    , webhookHost = env:WATCHER_BOT_WEBHOOK_HOST
+    , webhookPort = env:WATCHER_BOT_WEBHOOK_PORT
+    , webhookKeyPath = env:WATCHER_BOT_KEY_PATH
+    }
 }

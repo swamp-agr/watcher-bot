@@ -1,2 +1,3 @@
 dist-newstyle
 config/settings.dhall
+self-signed
