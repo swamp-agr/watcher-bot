@@ -158,9 +158,9 @@ Extra commands:
     , casTimeoutMs = 200
     }
 , communication = Communication.Webhook
-    { webhookCertPath = env:WATCHER_BOT_CERT_PATH
-    , webhookHost = env:WATCHER_BOT_WEBHOOK_HOST
+    { webhookCertPath = env:WATCHER_BOT_CERT_PATH as Text
+    , webhookHost = env:WATCHER_BOT_WEBHOOK_HOST as Text
     , webhookPort = env:WATCHER_BOT_WEBHOOK_PORT
-    , webhookKeyPath = env:WATCHER_BOT_KEY_PATH
+    , webhookKeyPath = env:WATCHER_BOT_KEY_PATH as Text
     }
 }
