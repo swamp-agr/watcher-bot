@@ -187,9 +187,15 @@ withLock action = liftIO $ do
       retryActionResponse retries
         | retries <= 1 = do
             log' @String "Too many retries"
-            runClientM action clientEnv
+            takeMVar requestLock
+            eResult <- runClientM action clientEnv
+            putMVar requestLock ()
+            pure eResult
         | otherwise = do
-            runClientM action clientEnv >>= \case
+            takeMVar requestLock
+            eResult <- runClientM action clientEnv
+            putMVar requestLock ()
+            case eResult of
               Left err -> case err of
                 ConnectionError exc -> case fromException exc of
                   -- Underlying http-client fails to establish connection
@@ -220,10 +226,8 @@ withLock action = liftIO $ do
                         wait $ coerce timeoutSec
                         retryActionResponse (pred retries)
 
-  takeMVar requestLock
   eResult <- retryActionResponse (10 :: Int)
   let mResult = either (const Nothing) Just eResult
-  putMVar requestLock ()
   pure mResult
 
 call :: WithBotState => (MonadIO m, Show a, a ~ Response b) => ClientM a -> m (Maybe a)
