@@ -178,23 +178,27 @@ unlessDebug action = unless isDebugEnabled $! action
 withDebug :: (WithBotState, Monad m) => m () -> m ()
 withDebug action = when isDebugEnabled $! action
 
-withLock
+withLock :: WithBotState => ClientM a -> IO (Either ClientError a)
+withLock action = do
+  let BotState{clientEnv, requestLock} = ?model
+  takeMVar requestLock
+  eResult <- runClientM action clientEnv
+  putMVar requestLock ()
+  pure eResult
+
+withLockAndRetry
   :: forall m a b. (WithBotState, Show a, MonadIO m, a ~ Response b)
   => ClientM a -> m (Maybe a)
-withLock action = liftIO $ do
-  let BotState{clientEnv, requestLock} = ?model
+withLockAndRetry action = liftIO $ do
+  let BotState{botSettings} = ?model
+      Settings{..} = botSettings
 
       retryActionResponse retries
         | retries <= 1 = do
             log' @String "Too many retries"
-            takeMVar requestLock
-            eResult <- runClientM action clientEnv
-            putMVar requestLock ()
-            pure eResult
+            withLock action
         | otherwise = do
-            takeMVar requestLock
-            eResult <- runClientM action clientEnv
-            putMVar requestLock ()
+            eResult <- withLock action
             case eResult of
               Left err -> case err of
                 ConnectionError exc -> case fromException exc of
@@ -226,7 +230,7 @@ withLock action = liftIO $ do
                         wait $ coerce timeoutSec
                         retryActionResponse (pred retries)
 
-  eResult <- retryActionResponse (10 :: Int)
+  eResult <- retryActionResponse (fromIntegral @_ @Int botCallRetries)
   let mResult = either (const Nothing) Just eResult
   pure mResult
 
@@ -235,7 +239,7 @@ call = liftIO . callIO
 
 callIO :: (WithBotState, Show a, a ~ Response b) => ClientM a -> IO (Maybe a)
 callIO action = do
-  response <- liftIO (withLock action)
+  response <- liftIO (withLockAndRetry action)
   waitMs 400
   pure response
 
