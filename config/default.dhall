@@ -60,7 +60,8 @@ let WorkerMode =
   >
 in
 { botName = env:WATCHER_BOT_NAME as Text
-, botResponseTimeout = 60
+, botResponseTimeout = 20
+, botCallRetries = 30
 , botToken = env:WATCHER_BOT_TOKEN as Text
 , ownerGroup =
     Some { ownerGroupId = env:WATCHER_BOT_OWNER_GROUP
