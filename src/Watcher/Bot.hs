@@ -170,7 +170,7 @@ runTelegramBot st@BotState{..} = do
         Webhook webhookCfg -> startBotWebhookAsync' webhookCfg
 
       startWebhookAsync bot WebhookConfig{..} env = do
-        botEnv <- startBotEnv bot env
+        botEnv <- deleteWebhook env >> startBotEnv bot env
         setUpWebhook webhookConfigSetWebhookRequest env >>= \case
           Left err -> error $ show err
           Right _ -> fork_ $ do
