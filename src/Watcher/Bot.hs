@@ -166,11 +166,11 @@ runTelegramBot st@BotState{..} = do
   let ?model = st
   let Settings{..} = botSettings
       startBot' = case communication of
-        LongPolling -> startBotAsync
+        LongPolling -> startBotAsync'
         Webhook webhookCfg -> startBotWebhookAsync' webhookCfg
 
       startWebhookAsync bot WebhookConfig{..} env = do
-        botEnv <- deleteWebhook env >> startBotEnv bot env
+        botEnv <- startBotEnv bot env
         setUpWebhook webhookConfigSetWebhookRequest env >>= \case
           Left err -> error $ show err
           Right _ -> fork_ $ do
@@ -196,6 +196,8 @@ runTelegramBot st@BotState{..} = do
               , webhookConfigSetWebhookRequest = requestData
               }
         startWebhookAsync bot cfg env
+
+      startBotAsync' bot env = deleteWebhook env >> startBotAsync bot env
 
   botActionFun <- startBot' watcherBot clientEnv
   runConcurrently $
