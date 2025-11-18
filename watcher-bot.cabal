@@ -123,6 +123,7 @@ library
                     , hashable
                     , http-client
                     , http-client-tls
+                    , http-types
                     , katip
                     , mtl
                     , optparse-applicative
