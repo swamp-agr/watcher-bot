@@ -17,7 +17,7 @@ import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
 import Network.HTTP.Client
   ( Manager, HttpException(..), HttpExceptionContent(..)
-  , managerResponseTimeout, newManager, responseTimeoutMicro
+  , managerConnCount, managerResponseTimeout, newManager, responseTimeoutMicro
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Katip
@@ -74,7 +74,8 @@ newBotState :: Settings -> IO BotState
 newBotState settings@Settings{..} = do
   logEnv <- makeLogEnv
   admins <- newTVarIO HM.empty
-  clientEnv <- createTelegramClientEnv (Token botToken) (fromIntegral botResponseTimeout)
+  clientEnv <- createTelegramClientEnv
+    (Token botToken) (fromIntegral botConnectionCount) (fromIntegral botResponseTimeout)
   groups <- newTVarIO HM.empty
   users <- newTVarIO HM.empty
   blocklist <- newTVarIO newBlocklist
@@ -91,7 +92,8 @@ importBotState settings@Settings {..} = do
   let StorageSettings {..} = storage
       adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
 
-  clientEnv <- createTelegramClientEnv (Token botToken) (fromIntegral botResponseTimeout)
+  clientEnv <- createTelegramClientEnv
+    (Token botToken) (fromIntegral botConnectionCount) (fromIntegral botResponseTimeout)
   requestLock <- newMVar ()
   self <- newTVarIO Nothing
   logEnv <- makeLogEnv
@@ -106,11 +108,15 @@ importBotState settings@Settings {..} = do
 
   pure $ BotState { botSettings = settings, .. }
 
-createTelegramClientEnv :: Token -> Int -> IO ClientEnv
-createTelegramClientEnv token timeoutSec =
+createTelegramClientEnv :: Token -> Int -> Int -> IO ClientEnv
+createTelegramClientEnv token connCount timeoutSec =
   let respTimeout = responseTimeoutMicro (timeoutSec * 1_000_000)
   in mkClientEnv
-     <$> newManager (tlsManagerSettings { managerResponseTimeout = respTimeout })
+     <$> newManager
+       (tlsManagerSettings
+         { managerResponseTimeout = respTimeout
+         , managerConnCount = connCount
+         })
      <*> pure (botBaseUrl token)
 
 data BanState = BanState

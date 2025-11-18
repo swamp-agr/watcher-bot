@@ -94,6 +94,7 @@ data CasSettings = CasSettings
 data Settings = Settings
   { botName :: Text -- ^ Telegram bot name. Used to parse @/command\@botname@.
   , botResponseTimeout :: Natural -- ^ Response timeout for API requests in seconds.
+  , botConnectionCount :: Natural -- ^ Amount of connections for Connection Manager. Default: 10.
   , botCallRetries :: Natural -- ^ Amount of retries
   , botToken :: Text -- ^ Bot token.
   , ownerGroup :: Maybe OwnerGroupSettings -- ^ Optional, super-admin group settings.
