@@ -60,6 +60,7 @@ let WorkerMode =
   >
 in
 { botName = env:WATCHER_BOT_NAME as Text
+, botConnectionCount = 32
 , botResponseTimeout = 20
 , botCallRetries = 30
 , botToken = env:WATCHER_BOT_TOKEN as Text
