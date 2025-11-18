@@ -17,9 +17,11 @@ import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
 import Network.HTTP.Client
   ( Manager, HttpException(..), HttpExceptionContent(..)
-  , managerConnCount, managerResponseTimeout, newManager, responseTimeoutMicro
+  , managerConnCount, managerModifyRequest
+  , managerResponseTimeout, newManager, requestHeaders, responseTimeoutMicro
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types (hConnection)
 import Katip
 import Servant.Client (ClientEnv, ClientError (..), ClientM, mkClientEnv, runClientM)
 import System.IO (stdout)
@@ -28,6 +30,7 @@ import Telegram.Bot.API.Names
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 
@@ -109,15 +112,25 @@ importBotState settings@Settings {..} = do
   pure $ BotState { botSettings = settings, .. }
 
 createTelegramClientEnv :: Token -> Int -> Int -> IO ClientEnv
-createTelegramClientEnv token connCount timeoutSec =
+createTelegramClientEnv token connCount timeoutSec = do
   let respTimeout = responseTimeoutMicro (timeoutSec * 1_000_000)
-  in mkClientEnv
-     <$> newManager
+
+      addKeepAliveMaybe [] = [(hConnection, "keep-alive")]
+      addKeepAliveMaybe hdrs = if (Map.member hConnection . Map.fromList) hdrs
+        then hdrs
+        else (hConnection, "keep-alive") : hdrs
+
+      modifyRequest req = pure
+        (req { requestHeaders = addKeepAliveMaybe (requestHeaders req) })
+
+  mkClientEnv
+    <$> newManager
        (tlsManagerSettings
          { managerResponseTimeout = respTimeout
          , managerConnCount = connCount
+         , managerModifyRequest = modifyRequest
          })
-     <*> pure (botBaseUrl token)
+    <*> pure (botBaseUrl token)
 
 data BanState = BanState
   { bannedMessages :: HashSet MessageText
