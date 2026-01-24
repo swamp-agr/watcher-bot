@@ -21,6 +21,7 @@ import qualified Data.HashSet as HS
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
 
 import Watcher.Bot.Analytics
 import Watcher.Bot.Cache
@@ -37,7 +38,7 @@ handleAnalyseMessage :: WithBotState => ChatId -> UserId -> Message -> BotM ()
 handleAnalyseMessage chatId userId message = do
   let BotState {..} = ?model
   mChatState <- lookupCache groups chatId
-  forM_ mChatState $ \ch@ChatState{..} -> case chatSetup of
+  forM_ mChatState $ \ch@ChatState{..} -> case chatStateSetup of
     SetupNone -> pure ()
     SetupInProgress {} -> pure ()
     SetupCompleted {} -> analyseMessage chatId ch userId message
@@ -57,8 +58,9 @@ handleTuning Update{..} = do
           liftIO $ log' ("ChatFullInfo" :: Text, mResponse)
           let mChat = responseResult <$> mResponse
               qs = emptyQuarantineState { quarantineUserChatInfo = toChatInfo <$> mChat }
-              ch = (newChatState botSettings) { quarantine = HM.singleton userId' qs }
-              decision = decideAboutMessage ch messageOriginUserSenderUser msg
+          ch <- liftIO $ newChatState botSettings
+          liftIO $ HT.insert (chatStateQuarantine ch) userId' qs
+          decision <- decideAboutMessage ch messageOriginUserSenderUser msg
           replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
         _ -> pure ()
 
@@ -77,7 +79,8 @@ analyseMessage chatId ch userId message = do
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
     then do
-      unless (HS.member userId (allowlist ch)) do
+      userIsAllowed <- liftIO (isJust <$> HT.lookup (chatStateAllowlist ch) userId)
+      unless userIsAllowed do
         fullBan ReplyUserAlreadyBanned []
     else callCasCheck userId >>= \case
     Just messages -> do
@@ -87,11 +90,11 @@ analyseMessage chatId ch userId message = do
       knownSpamMessage <- isKnownSpamMessage messageInfo
       if knownSpamMessage
         then handleBanByRegularUser chatId ch Nothing messageInfo
-        else case userIsInChatQuarantine ch userId of
+        else userIsInChatQuarantine ch userId >>= \case
           Nothing -> pure ()
           Just inQuarantine -> forM_ (messageFrom message) $ \user -> do
             now <- liftIO getCurrentTime
-            case decideAboutMessage ch user message of
+            (liftIO $ decideAboutMessage ch user message) >>= \case
               RegularMessage _ ->
                 incrementQuarantineCounter chatId ch userId inQuarantine message
               ProbablySpamMessage _ ->
@@ -106,7 +109,7 @@ incrementQuarantineCounter
 incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{..} = do
   let BotState {..} = ?model
   forM_ messageText $ \txt -> do
-    let GroupSettings{..} = chatSettings
+    let GroupSettings{..} = chatStateSettings
         enoughToRelease = inQuarantine + 1 == fromIntegral messagesInQuarantine
         hash = hexSha256 txt
     if enoughToRelease
@@ -120,19 +123,21 @@ incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{.
               { quarantineMessageHash = Set.insert hash quarantineMessageHash
               , quarantineMessageId = Set.insert messageMessageId quarantineMessageId
               }
-            nextState = ch { quarantine = HM.alter go userId quarantine }
-        writeCache groups chatId nextState
+        liftIO $ HT.alter chatStateQuarantine go userId
+        writeCache groups chatId ch
 
-userIsInChatQuarantine :: ChatState -> UserId -> Maybe Int
-userIsInChatQuarantine ChatState{..} userId =
-  HM.lookup userId quarantine >>= pure . Set.size . quarantineMessageHash
+userIsInChatQuarantine :: MonadIO m => ChatState -> UserId -> m (Maybe Int)
+userIsInChatQuarantine ChatState{..} userId = do
+  mQuarantine <- liftIO $ HT.lookup chatStateQuarantine userId
+  forM mQuarantine (pure . Set.size . quarantineMessageHash)
 
 endQuarantineForUser :: (WithBotState, MonadIO m) => ChatId -> UserId -> m ()
 endQuarantineForUser chatId userId = do
   let BotState {..} = ?model
-      go Nothing = Nothing
-      go (Just ch@ChatState{..}) = Just $! ch { quarantine = HM.delete userId quarantine }
-  alterCache groups chatId go
+  mChatState <- lookupCache groups chatId
+  forM_ mChatState \ch@ChatState{..} -> do
+    liftIO $ HT.delete chatStateQuarantine userId
+    writeCache groups chatId ch
 
 addToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
 addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
@@ -142,14 +147,16 @@ addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
         userInfo = userToUserInfo newcomer
 
         fullBanAction bs@BanState{..} banType messages = do
-          let messageSet = HS.fromList (MessageText <$> messages)
-              nextBanState = bs
-                { bannedChats = HS.insert chatId bannedChats
-                , bannedMessages = HS.union messageSet bannedMessages
-                }
+          messageSet <- liftIO $ toHSet $ HS.fromList (MessageText <$> messages)
+          let goBans _ = liftIO do
+                HT.insert banStateChats chatId ()
+                nextMessages <- HT.union banStateMessages messageSet
+                pure $! Just $! bs { banStateMessages = nextMessages }
+
               spamer = userToUserInfo newcomer
               spamerId = SpamerId $! userInfoId spamer
-          alterBlocklist blocklist userInfo $! const $! Just nextBanState
+
+          liftIO $ alterBlocklistM blocklist userInfo $! goBans
 
           banSpamerInChat chatId spamer
           removeAllQuarantineMessages ch chatId spamerId
@@ -163,12 +170,13 @@ addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
       Nothing -> callCasCheck uid >>= \case
 
         Just messages -> do
-          fullBanAction newBanState ReplyUserCASBanned messages
+          nbs <- liftIO newBanState
+          fullBanAction nbs ReplyUserCASBanned messages
           pure Nothing
 
         Nothing -> do
           now <- liftIO getCurrentTime
-          userIsSpammer <- case decideAboutMessage ch newcomer message of
+          userIsSpammer <- (liftIO $ decideAboutMessage ch newcomer message) >>= \case
             RegularMessage _ -> pure False
             ProbablySpamMessage _ -> do
               sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
@@ -195,9 +203,10 @@ addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
-      newUserMap = HM.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
       go prev _new = prev -- current strategy: leave previous state, do not flush it
-      nextState = ch { quarantine = HM.unionWith go quarantine newUserMap }
+  newUserMap <- liftIO $ HT.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
+  nextQuarantine <- liftIO $ HT.unionWith go chatStateQuarantine newUserMap
+  let nextState = ch { chatStateQuarantine = nextQuarantine }
 
   writeCache groups chatId nextState
 
@@ -288,18 +297,20 @@ hasNoUsername = getUserScore go scoreUserHasNoUsername
   where
     go u = (isNothing . userUsername) u || (Text.null . getUserName) u
 
-doesNameContainEmoji :: ChatState -> ScoreSettings -> User -> Int
-doesNameContainEmoji ChatState{..} = getUserScore go scoreUserNameContainsEmoji
-  where
-    go :: User -> Bool
-    go u =
-      let mChat = quarantineUserChatInfo =<< HM.lookup (userId u) quarantine
-          txt = getUserName u
+doesNameContainEmoji
+  :: MonadIO m => ChatState -> ScoreSettings -> User -> m Int
+doesNameContainEmoji ChatState{..} scores u = do
+  mQuarantine <- liftIO $ HT.lookup chatStateQuarantine (userId u)
+  let mChat = quarantineUserChatInfo =<< mQuarantine
+      go :: User -> Bool
+      go u =
+        let txt = getUserName u
 
-          chatContainsAnyEmoji ChatInfo{..} =
-            isJust chatInfoEmojiStatusCustomEmojiId
-            || isJust chatInfoBackgroundCustomEmojiId
-      in containAnyEmoji txt || (maybe False chatContainsAnyEmoji mChat)
+            chatContainsAnyEmoji ChatInfo{..} =
+              isJust chatInfoEmojiStatusCustomEmojiId
+              || isJust chatInfoBackgroundCustomEmojiId
+        in containAnyEmoji txt || (maybe False chatContainsAnyEmoji mChat)
+  pure $! getUserScore go scoreUserNameContainsEmoji scores u
 
 -- FIXME: handle composite emoji too
 containAnyEmoji :: Text -> Bool
@@ -320,18 +331,27 @@ isKnownSpamerName ScoreSettings{scoreUserKnownSpamerNames} u =
 isPremiumScore :: ScoreSettings -> User -> Int
 isPremiumScore = getUserScore ((== Just True) . userIsPremium) scoreUserHasPremium
 
-getUserAdultScore :: WithBotState => ChatState -> ScoreSettings -> User -> Int
-getUserAdultScore ChatState{..} ScoreSettings{..} u =
+getUserAdultScore
+  :: (MonadIO m, WithBotState) => ChatState -> ScoreSettings -> User -> m Int
+getUserAdultScore ChatState{..} ScoreSettings{..} u = do
   let BotState {..} = ?model
-      go n c = n + if HS.member c adultEmoji then scoreUserAdultScore else 0
-      computeScore txt = fromIntegral $ Text.foldl' go 0 txt
-      getChatScore ChatInfo{..} = computeScore chatInfoName
-        + maybe 0 computeScore chatInfoBio
+  mQuarantine <- liftIO $ HT.lookup chatStateQuarantine (userId u)
+
+  let mChat = quarantineUserChatInfo =<< mQuarantine
+      go c = do
+        isAdultEmoji <- liftIO (isJust <$> HT.lookup adultEmoji c)
+        pure $! if isAdultEmoji then scoreUserAdultScore else 0
+      computeScore txt = do
+        scores <- sequenceA (go <$> Text.unpack txt)
+        pure $ fromIntegral $ sum scores
+      getChatScore ChatInfo{..} = do
+        nameScore <- computeScore chatInfoName
+        bioScore <- maybe (pure 0) computeScore chatInfoBio
+        pure $! nameScore + bioScore
       
-      userScore = computeScore (getUserName u)
-      mChat = quarantineUserChatInfo =<< HM.lookup (userId u) quarantine
-      chatScore = maybe 0 getChatScore mChat
-  in userScore + chatScore
+  userScore <- computeScore (getUserName u)
+  chatScore <- maybe (pure 0) getChatScore mChat
+  pure $! userScore + chatScore
 
 messageContainsRichMarkup :: ScoreSettings -> Message -> Int
 messageContainsRichMarkup ScoreSettings{..}
@@ -358,12 +378,14 @@ textWordsScore ScoreSettings{scoreMessageWordsScore} txt =
 messageUsernameWordsScore :: ScoreSettings -> User -> Map Text Int
 messageUsernameWordsScore score = textWordsScore score . getUserName
 
-messageCopyPasteScore :: ScoreSettings -> ChatState -> UserId -> Message -> Int
-messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} = 
+messageCopyPasteScore
+  :: MonadIO m => ScoreSettings -> ChatState -> UserId -> Message -> m Int
+messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} = do
+  mQuarantine <- liftIO $ HT.lookup chatStateQuarantine userId
   let messages = fromMaybe Set.empty
         $! fmap quarantineMessageHash
-        $! HM.lookup userId quarantine
-  in if Set.null messages
+        $! mQuarantine
+  pure $ if Set.null messages
     then 0
     else let messageExist = fromMaybe False
                (flip Set.member messages . hexSha256 <$> messageText)
@@ -372,20 +394,23 @@ messageCopyPasteScore ScoreSettings{..} ChatState{..} userId Message{..} =
             else 0
 
 decideAboutMessage
-  :: WithBotState => ChatState -> User -> Message -> MessageDecision
-decideAboutMessage ch user@User{userId} msg =
+  :: (MonadIO m, WithBotState) => ChatState -> User -> Message -> m MessageDecision
+decideAboutMessage ch user@User{userId} msg = do
   let BotState {..} = ?model
       Settings{..} = botSettings
-      
-      userMessageScore = UserMessageScore
+
+  userMessageScoreCopyPaste <- messageCopyPasteScore scores ch userId msg
+  userMessageScoreAdult <- getUserAdultScore ch scores user
+  userMessageScoreEmojiInName <- doesNameContainEmoji ch scores user
+  let userMessageScore = UserMessageScore
         { userMessageScoreNoUsername = hasNoUsername scores user
-        , userMessageScoreEmojiInName = doesNameContainEmoji ch scores user
+        , userMessageScoreEmojiInName
         , userMessageScoreIsPremium = isPremiumScore scores user
-        , userMessageScoreAdult = getUserAdultScore ch scores user
+        , userMessageScoreAdult
         , userMessageScoreKnownName = isKnownSpamerName scores user
         , userMessageScoreRichMarkup = messageContainsRichMarkup scores msg
         , userMessageScoreWords = messageWordsScore scores msg
-        , userMessageScoreCopyPaste = messageCopyPasteScore scores ch userId msg
+        , userMessageScoreCopyPaste
         , userMessageScoreUsernameWords = messageUsernameWordsScore scores user
         }
       totalScore = getTotalScore userMessageScore
@@ -398,7 +423,7 @@ decideAboutMessage ch user@User{userId} msg =
           then ProbablySpamMessage
           else MostLikelySpamMessage
   
-  in mkDecision userMessageScore
+  pure $! mkDecision userMessageScore
 
 renderDecision :: MessageDecision -> Text
 renderDecision = \case

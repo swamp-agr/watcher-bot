@@ -51,11 +51,11 @@ migrate = do
         => (Text, FilePath) -> IO ()
       run = runMigration @a recentMigrationPath
 
-  run @Admins ("migrateAdmins", adminsPath)
-  run @Blocklist ("migrateBlocklist", blocklistPath)
-  run @Groups ("migrateGroups", groupsPath)
-  run @SpamMessages ("migrateSpamMessages", spamMessagesPath)
-  run @Users ("migrateUsers", usersPath)
+  run @AdminStorage ("migrateAdmins", adminsPath)
+  run @BlocklistStorage ("migrateBlocklist", blocklistPath)
+  run @GroupStorage ("migrateGroups", groupsPath)
+  run @SpamMessageStorage ("migrateSpamMessages", spamMessagesPath)
+  run @UserStorage ("migrateUsers", usersPath)
   run @Events ("migrateEvents", eventSetPath)
 
 runMigration

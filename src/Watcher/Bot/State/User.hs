@@ -1,14 +1,13 @@
 module Watcher.Bot.State.User where
 
-import Data.HashSet (HashSet)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
 import Telegram.Bot.API
 
-import qualified Data.HashSet as HS
 import qualified Data.Map.Strict as Map
+import qualified Data.Vector.Hashtables as HT
 
 import Watcher.Bot.Types
 import Watcher.Orphans ()
@@ -114,8 +113,8 @@ switchMenu ms currentMenuId chatId = case ms of
     , singleGroupSubMenu = selectNextMenu currentMenuId
     }
 
-chatSetToMap :: HashSet (ChatId, Maybe Text) -> Map ChatId (Maybe Text)
-chatSetToMap = Map.fromList . HS.toList
+chatSetToMap :: HashSet (ChatId, Maybe Text) -> IO (Map ChatId (Maybe Text))
+chatSetToMap = fmap (Map.fromList . fmap fst) . HT.toList
 
-chatMapToSet :: Map ChatId (Maybe Text) -> HashSet (ChatId, Maybe Text)
-chatMapToSet = HS.fromList . Map.toList
+chatMapToSet :: Map ChatId (Maybe Text) -> IO (HashSet (ChatId, Maybe Text))
+chatMapToSet = HT.fromList . fmap (, ()) . Map.toList

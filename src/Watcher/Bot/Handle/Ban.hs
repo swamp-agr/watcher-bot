@@ -16,6 +16,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
 
 import Watcher.Bot.Analytics
 import Watcher.Bot.Cache
@@ -32,7 +33,8 @@ handleBanAction
 handleBanAction chatId ch@ChatState{..} voterId messageId orig = do
   void $ call $ deleteMessage chatId messageId
   forwardToOwnersMaybe Spam chatId (messageInfoId orig)
-  if coerce @_ @UserId voterId `HS.member` chatAdmins
+  voterIsAdmin <- liftIO (isJust <$> HT.lookup chatStateAdmins (coerce @_ @UserId voterId))
+  if voterIsAdmin
     then handleBanByAdmin chatId ch orig
     else handleBanByRegularUser chatId ch (Just voterId) orig
 
@@ -46,28 +48,27 @@ handleAdminBan
   -> BotM ()
 handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
   let BotState{..} = ?model
-      userIsAdmin = userId `HS.member` chatAdmins
-      spamerId = adminBanIdToSpamerId adminBanId
+  userIsAdmin <- liftIO (isJust <$> HT.lookup chatStateAdmins userId)
+  let spamerId = adminBanIdToSpamerId adminBanId
   when userIsAdmin $ do
     case adminBanId of
       AdminAgainstBan _ _ -> do
         void $ call $ deleteMessage chatId messageId
-        let nextState = ch { adminCalls = HM.delete spamerId adminCalls }
-        writeCache groups chatId nextState
+        liftIO $ HT.delete chatStateAdminCalls spamerId
+        writeCache groups chatId ch
         pure ()
       AdminForBan _ _ -> do
         void $ call $ deleteMessage chatId messageId
-        case HM.lookup spamerId adminCalls  of
+        (liftIO $ HT.lookup chatStateAdminCalls spamerId) >>= \case
           Nothing -> pure ()
           Just (spamer, orig) -> do
             updateBlocklistAndMessages chatId [] orig
             banSpamerInChat chatId spamer
             removeAllQuarantineMessages ch chatId spamerId
-            let nextState =
-                  ch { adminCalls = HM.delete spamerId adminCalls
-                     , quarantine = HM.delete (coerce @_ @UserId spamerId) quarantine
-                     }
-            writeCache groups chatId nextState
+            liftIO do
+              HT.delete chatStateAdminCalls spamerId
+              HT.delete chatStateQuarantine (coerce @_ @UserId spamerId)
+            writeCache groups chatId ch
             selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
 
 banSpamerInChat :: WithBotState => ChatId -> UserInfo -> BotM ()
@@ -94,7 +95,7 @@ handleBanByAdmin chatId ch@ChatState{..} orig@MessageInfo{..} = do
   forM_ mSpamerUser \spamer -> do
     -- remove poll if exists
     let spamerId = SpamerId $ userInfoId spamer
-        mPoll = HM.lookup spamerId activePolls
+    mPoll <- liftIO $ HT.lookup chatStateActivePolls spamerId
     forM_ (pollMessageId <$> mPoll) (void . call . deleteMessage chatId)
     closeBanPoll ch chatId spamerId
 
@@ -111,7 +112,7 @@ handleBanByRegularUser chatId ch@ChatState{..} mVoterId orig = do
         { eventData = Just "by_user_or_bot" }
   sendEvent evt
 
-  let GroupSettings{spamCommandAction, usersForConsensus} = chatSettings
+  let GroupSettings{spamCommandAction, usersForConsensus} = chatStateSettings
       mSpamerUser = messageInfoFrom orig
   forM_ mSpamerUser $ \spamer -> case spamCommandAction of
     SCPoll ->
@@ -123,9 +124,8 @@ handleBanViaAdminsCall
 handleBanViaAdminsCall chatId ch@ChatState{..} spamer orig = do
   let BotState {..} = ?model
       spamerId = SpamerId $! userInfoId spamer
-      nextState = ch
-        { adminCalls = HM.insert spamerId (spamer, orig) adminCalls }
-  writeCache groups chatId nextState
+  liftIO $ HT.insert chatStateAdminCalls spamerId (spamer, orig)
+  writeCache groups chatId ch
 
   (call $ getChatAdministrators (SomeChatId chatId)) >>= \case
     Just Response{..} -> if not responseOk
@@ -161,15 +161,14 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
       selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
     else do
       botItself <- liftIO $ readTVarIO self
+      adminReported <- liftIO (isJust <$> HT.lookup chatStateAdmins (coerce spamerId))
       let mBotId = (VoterId . userInfoId) <$> botItself
           mVoterIdOrBotId = mVoterId <|> mBotId
           voter = if isNothing mVoterIdOrBotId || isJust mBotId
             then BotVoter
             else UserVoter
-          mPollState = HM.lookup spamerId activePolls
-
-          adminReported = coerce spamerId `HS.member` chatAdmins
           selfReport = maybe False (coerce spamerId ==) mVoterId
+      mPollState <- liftIO $ HT.lookup chatStateActivePolls spamerId
 
       unless (adminReported || selfReport) $ do
         mPoll <- case mPollState of
@@ -177,10 +176,10 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} mVoterId spamer orig consensus
             $! messageInfoId orig
           Just poll -> do
             let currentPollSize = HS.size (pollVoters poll)
-                nextPollState =
-                  maybe poll
-                    (\voterId -> fst $! addVoteToPoll ch voterId spamerId poll) mVoterId
-                pollSizeChanged = currentPollSize /= HS.size (pollVoters nextPollState)
+            nextPollState <- case mVoterId of
+              Nothing -> pure poll
+              Just voterId -> fst <$> addVoteToPoll ch voterId spamerId poll
+            let pollSizeChanged = currentPollSize /= HS.size (pollVoters nextPollState)
             pure $! Just (pollSizeChanged, nextPollState)
 
         -- at this point poll *must* be created
@@ -205,19 +204,20 @@ updateBlocklistAndMessages chatId extraMessages MessageInfo{..} = do
 
 updateBlocklist
   :: (WithBotState, MonadIO m) => ChatId -> UserInfo -> [MessageText] -> m ()
-updateBlocklist chatId user messages =
+updateBlocklist chatId user messages = do
+  nbs <- liftIO newBanState
   let BotState{..} = ?model
-      messageSet = HS.fromList messages
-      goBans Nothing = Just $! newBanState
-        { bannedMessages = messageSet
-        , bannedChats = HS.singleton chatId
+  messageSet <- liftIO $ toHSet (HS.fromList messages)
+  singleChat <- liftIO $ HT.fromList [(chatId, ())]
+  let goBans Nothing = pure $ Just $! nbs
+        { banStateMessages = messageSet
+        , banStateChats = singleChat
         }
-      goBans (Just hs@BanState{..}) =
-        Just $! hs
-          { bannedMessages = HS.union messageSet bannedMessages
-          , bannedChats = HS.insert chatId bannedChats
-          }
-  in alterBlocklist blocklist user goBans 
+      goBans (Just hs) = do
+        nextMessages <- liftIO $ HT.union messageSet (banStateMessages hs)
+        HT.insert (banStateChats hs) chatId ()
+        pure $! Just $! hs { banStateMessages = nextMessages }
+  alterBlocklistM blocklist user goBans 
 
 hasUserAlreadyBannedElsewhere :: WithBotState => UserId -> BotM Bool
 hasUserAlreadyBannedElsewhere userId =
@@ -233,10 +233,12 @@ proceedWithPoll
   -> (Bool, PollState)
   -> BotM ()
 proceedWithPoll ch@ChatState{..} chatId spamerId voterId mOrig (pollChanged, poll@PollState{..}) = do
-  let consensus = usersForConsensus chatSettings
+  voterIsAdmin <- case voterId of
+    Nothing -> pure False
+    Just vid -> liftIO (isJust <$> HT.lookup chatStateAdmins (coerce @_ @UserId vid))
+  let consensus = usersForConsensus chatStateSettings
       voters = HS.size pollVoters
-      checkVoterId = (`HS.member` chatAdmins) . coerce @_ @UserId
-      enoughToBan = fromIntegral consensus <= voters || maybe False checkVoterId voterId
+      enoughToBan = fromIntegral consensus <= voters || voterIsAdmin
   case (not pollChanged, enoughToBan) of
     -- Poll message has been originated, nothing to worry about
     (True, _) -> pure ()
@@ -268,7 +270,7 @@ handleVoteBan chatId ch@ChatState{..} voterId _messageId voteBanId = do
   -- but it is needed for debug only
   if selfVote && not isDebugEnabled
     then pure ()
-    else case HM.lookup spamerId activePolls of
+    else (liftIO $ HT.lookup chatStateActivePolls spamerId) >>= \case
       -- Race? Poll's been closed but decision was too late? Don't care
       Nothing -> pure ()
       Just poll@PollState{pollMessageId, pollSpamer} -> case voteBanId of
@@ -278,25 +280,25 @@ handleVoteBan chatId ch@ChatState{..} voterId _messageId voteBanId = do
           void $ call $ deleteMessage chatId pollMessageId
           selfDestructReply chatId ch (ReplyUserRecovered pollSpamer)
         VoteForBan _ _ -> do
-          let (newPoll, nextChatState) = addVoteToPoll ch voterId spamerId poll
-              pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)
+          (newPoll, nextChatState) <- addVoteToPoll ch voterId spamerId poll
+          let pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)
           proceedWithPoll nextChatState chatId spamerId (Just voterId) Nothing (pollChanged, newPoll)
 
 closeBanPoll :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
 closeBanPoll st@ChatState{..} chatId spamerId = do
   let BotState {..} = ?model
-  let nextChatState = st { activePolls = HM.delete spamerId activePolls }
-  writeCache groups chatId nextChatState
+  liftIO $ HT.delete chatStateActivePolls spamerId
+  writeCache groups chatId st
 
 allowUserInGroup :: WithBotState => ChatState -> ChatId -> UserId -> BotM ()
 allowUserInGroup st@ChatState{..} chatId userId = do
   let BotState {..} = ?model
-  let nextChatState = st { allowlist = HS.insert userId allowlist }
-  writeCache groups chatId nextChatState
+  liftIO $ HT.insert chatStateAllowlist userId ()
+  writeCache groups chatId st
 
 removeAllQuarantineMessages :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
 removeAllQuarantineMessages ChatState{..} chatId spamerId = do
-  let mQuarantine = HM.lookup (coerce @_ @UserId spamerId) quarantine
+  mQuarantine <- liftIO $ HT.lookup chatStateQuarantine (coerce @_ @UserId spamerId)
   forM_ mQuarantine \QuarantineState{..} -> 
     forM_ (Set.toList quarantineMessageId) (void . call . deleteMessage chatId )
 
@@ -328,7 +330,7 @@ createBanPoll st chatId spamerId mVoterId voter consensus spamer messageId = do
       then pure Nothing
       else do
         let pollId = messageMessageId responseResult
-            (poll, nextChatState) = startBanPoll st mVoterId spamerId spamer pollId messageId
+        (poll, nextChatState) <- startBanPoll st mVoterId spamerId spamer pollId messageId
         writeCache groups chatId nextChatState
         pure $ Just (False, poll)
 
@@ -343,8 +345,8 @@ updateBanPoll
   -> BotM ()
 updateBanPoll st@ChatState{..} chatId spamerId voters consensus poll@PollState{..} = do
   let BotState {..} = ?model
-  let nextChatState = st { activePolls = HM.insert spamerId poll activePolls }
-  writeCache groups chatId nextChatState
+  liftIO $ HT.insert chatStateActivePolls spamerId poll
+  writeCache groups chatId st
 
   let keyboard = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId
@@ -380,10 +382,11 @@ voteButtons chatId spamerId =
 handleBotBanAction
   :: WithBotState => ChatId -> ChatState -> UserId -> ChatMember -> BotM ()
 handleBotBanAction chatId ChatState{..} botUserId bannedMember = do
+  nbs <- liftIO newBanState
   let BotState {..} = ?model
-  let botIsAdmin' = botUserId `HS.member` chatAdmins
-      spamer = userToUserInfo $ chatMemberUser bannedMember
-      go = Just . fromMaybe newBanState
+  botIsAdmin' <- liftIO (isJust <$> HT.lookup chatStateAdmins botUserId)
+  let spamer = userToUserInfo $ chatMemberUser bannedMember
+      go = Just . fromMaybe nbs
 
   when botIsAdmin' $ do
     now <- liftIO getCurrentTime

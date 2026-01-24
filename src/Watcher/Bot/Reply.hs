@@ -4,7 +4,6 @@ import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Monad (forM_, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
-import Data.HashSet (HashSet)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
@@ -15,6 +14,7 @@ import Telegram.Bot.Simple
 import qualified Data.HashSet as HS
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Settings
@@ -113,7 +113,7 @@ selfDestructReply chatId ChatState{..} answer = when selfDestroyEnabled $ do
           }
     liftIO $! atomically $! modifyTVar' eventSet $! Set.insert msg
   where
-    GroupSettings{..} = chatSettings
+    GroupSettings{..} = chatStateSettings
 
 replyCallAdmins :: ChatId -> SpamerId -> [Text] -> MessageInfo -> BotM ()
 replyCallAdmins chatId spamerId adminUsernames originalMessage = do
@@ -138,7 +138,7 @@ withCompletedSetup chatId action = do
   let BotState {..} = ?model
   mChatState <- lookupCache groups chatId
   -- absence of chat state should be ignored
-  forM_ mChatState $ \ch@ChatState{..} -> case chatSetup of
+  forM_ mChatState $ \ch@ChatState{..} -> case chatStateSetup of
     SetupNone -> selfDestructReply chatId ch ReplyNoSetup
     SetupInProgress {} -> selfDestructReply chatId ch ReplyIncompletedSetup
     SetupCompleted {} -> action ch
@@ -146,7 +146,8 @@ withCompletedSetup chatId action = do
 -- | This one is coming from callback!
 replyMenu :: WithBotState => MenuState -> SetupMessageId -> ChatId -> UserId -> BotM ()
 replyMenu menuState messageId chatId  _userId = case menuState of
-  MultipleGroupsRoot {..} -> replyManyGroupsMenu messageId $ chatMapToSet multipleGroupsMenu
+  MultipleGroupsRoot {..} ->
+    liftIO (chatMapToSet multipleGroupsMenu) >>= replyManyGroupsMenu messageId
   MultipleGroupsSelected {..} ->
     replySingleGroupMenu chatId messageId multipleGroupsSelectedSubMenu
   SingleRoot {..} -> replySingleGroupMenu chatId messageId singleGroupSubMenu
@@ -200,13 +201,14 @@ replyManyGroupsMenu
   :: WithBotState => HasCallStack
   => SetupMessageId -> HashSet (ChatId, Maybe Text) -> BotM ()
 replyManyGroupsMenu messageId adminGroups = do
+  content <- liftIO (fmap fst <$> HT.toList adminGroups)
   let makeButton (chatId, mchatTitle) =
         [ actionButton 
             (fromMaybe ("Untitled chat: " <> s2t chatId) mchatTitle)
             (Multi chatId)
         ]
       setupKeyboard = InlineKeyboardMarkup
-        { inlineKeyboardMarkupInlineKeyboard = makeButton <$> HS.toList adminGroups
+        { inlineKeyboardMarkupInlineKeyboard = makeButton <$> content
         }
       editMsg = (toEditMessage "Choose group to set up") -- FIXME: configurable
         { editMessageReplyMarkup = Just $ SomeInlineKeyboardMarkup setupKeyboard
