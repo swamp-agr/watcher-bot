@@ -1,7 +1,6 @@
 module Watcher.Bot.State.Chat where
 
-import Data.HashMap.Strict (HashMap)
-import Data.HashSet (HashSet)
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Time (Day, UTCTime (..))
@@ -11,27 +10,43 @@ import Telegram.Bot.API
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
+import qualified Data.Vector.Hashtables as HT
 import qualified Data.Text as Text
 
 import Watcher.Bot.Settings
 import Watcher.Bot.Types
 import Watcher.Bot.Utils
 
-data ChatState = ChatState
+data ChatStorage = ChatStorage
   { chatSettings :: GroupSettings
-  , chatAdmins :: HashSet UserId
+  , chatAdmins :: HS.HashSet UserId
   , chatAdminsCheckedAt :: Maybe Day
   , chatSetup :: SetupState
-  , quarantine :: HashMap UserId QuarantineState
-  , activePolls :: HashMap SpamerId PollState -- ^ key is candidate for ban in given group, value is a set of unique voters in favour of ban and a message with poll.
-  , adminCalls :: HashMap SpamerId (UserInfo, MessageInfo)
-  , allowlist :: HashSet UserId
+  , quarantine :: HM.HashMap UserId QuarantineState
+  , activePolls :: HM.HashMap SpamerId PollState -- ^ key is candidate for ban in given group, value is a set of unique voters in favour of ban and a message with poll.
+  , adminCalls :: HM.HashMap SpamerId (UserInfo, MessageInfo)
+  , allowlist :: HS.HashSet UserId
   , botIsAdmin :: Bool
   }
   deriving (Show, Generic, FromDhall, ToDhall)
 
-newChatState :: Settings -> ChatState
-newChatState Settings{..} = ChatState
+data ChatState = ChatState
+  { chatStateSettings :: GroupSettings
+  , chatStateAdmins :: HashSet UserId
+  , chatStateAdminsCheckedAt :: Maybe Day
+  , chatStateSetup :: SetupState
+  , chatStateQuarantine :: HashMap UserId QuarantineState
+  , chatStateActivePolls :: HashMap SpamerId PollState -- ^ key is candidate for ban in given group, value is a set of unique voters in favour of ban and a message with poll.
+  , chatStateAdminCalls :: HashMap SpamerId (UserInfo, MessageInfo)
+  , chatStateAllowlist :: HashSet UserId
+  , chatStateBotIsAdmin :: Bool
+  }
+
+newChatState :: MonadIO m => Settings -> m ChatState
+newChatState = storageToChatState . newChatStorage
+
+newChatStorage :: Settings -> ChatStorage
+newChatStorage Settings{..} = ChatStorage
   { chatSettings = defaultGroupSettings
   , chatAdmins = HS.empty
   , chatAdminsCheckedAt = Nothing
@@ -42,6 +57,32 @@ newChatState Settings{..} = ChatState
   , allowlist = HS.empty
   , botIsAdmin = False
   }
+
+storageToChatState :: MonadIO m => ChatStorage -> m ChatState
+storageToChatState ChatStorage{..} = liftIO do
+  let chatStateSettings = chatSettings
+      chatStateAdminsCheckedAt = chatAdminsCheckedAt
+      chatStateSetup = chatSetup
+      chatStateBotIsAdmin = botIsAdmin
+  chatStateAdmins <- toHSet chatAdmins
+  chatStateQuarantine <- toHMap quarantine
+  chatStateActivePolls <- toHMap activePolls
+  chatStateAdminCalls  <- toHMap adminCalls
+  chatStateAllowlist <- toHSet allowlist
+  pure ChatState{..}
+
+chatToStorage :: MonadIO m => ChatState -> m ChatStorage
+chatToStorage ChatState{..} = liftIO do
+  let chatSettings = chatStateSettings
+      chatAdminsCheckedAt = chatStateAdminsCheckedAt
+      chatSetup = chatStateSetup
+      botIsAdmin = chatStateBotIsAdmin
+  chatAdmins <- fromHSet chatStateAdmins
+  quarantine <- fromHMap chatStateQuarantine
+  activePolls <- fromHMap chatStateActivePolls
+  adminCalls <- fromHMap chatStateAdminCalls
+  allowlist <- fromHSet chatStateAllowlist
+  pure ChatStorage {..}
 
 -- | State of the chat setup.
 -- Consider setup as an interruptible process with a lock and a given timeout.
@@ -66,29 +107,32 @@ setupChatSettings
   -> GroupSettings
   -> ChatState
 setupChatSettings st userId time newSettings = st
-  { chatSetup = SetupInProgress { setupModifiedByAdmin = userId, setupModifiedAt = time }
-  , chatSettings = newSettings
+  { chatStateSetup =
+      SetupInProgress { setupModifiedByAdmin = userId, setupModifiedAt = time }
+  , chatStateSettings = newSettings
   }
 
 startBanPoll
-  :: ChatState
+  :: MonadIO m
+  => ChatState
   -> Maybe VoterId
   -> SpamerId
   -> UserInfo -- ^ Spamer
   -> MessageId -- ^ poll message id
   -> MessageId -- ^ spamer message id
-  -> (PollState, ChatState)
-startBanPoll st@ChatState{..} mVoterId spamerId pollSpamer pollMessageId pollSpamMessageId =
+  -> m (PollState, ChatState)
+startBanPoll
+  st@ChatState{..} mVoterId spamerId pollSpamer pollMessageId pollSpamMessageId = liftIO do
   let newPoll = PollState
         { pollMessageId, pollSpamer, pollSpamMessageId
         , pollVoters = maybe HS.empty HS.singleton mVoterId
         }
-      poll = case HM.lookup spamerId activePolls of
-        Nothing -> newPoll
-        Just oldPoll -> oldPoll
-          { pollVoters = maybe HS.empty (flip HS.insert (pollVoters oldPoll)) mVoterId
-          }
-  in (poll, st { activePolls = HM.insert spamerId poll activePolls })
+  poll <- HT.lookup chatStateActivePolls spamerId >>= \case
+    Nothing -> pure newPoll
+    Just oldPoll -> pure $! oldPoll
+      { pollVoters = maybe HS.empty (flip HS.insert (pollVoters oldPoll)) mVoterId }
+  HT.insert chatStateActivePolls spamerId poll
+  pure (poll, st)
 
 renderChatState :: ChatState -> Text
 renderChatState ChatState{..} = Text.unlines
@@ -97,27 +141,30 @@ renderChatState ChatState{..} = Text.unlines
   , "Users for consensus: " <> s2t usersForConsensus
   , "Action on `/spam` command: " <> spamCommandToText spamCommandAction
   , "Quarantine duration (in messages): " <> s2t messagesInQuarantine
-  , "Is Bot Admin Already? " <> if botIsAdmin then "✔️" else "❌"
+  , "Is Bot Admin Already? " <> if chatStateBotIsAdmin then "✔️" else "❌"
   , "Send Self-destroyable messages: " <> if selfDestroyEnabled then "✔️" else "❌"
   ]
   where
-    GroupSettings {..} = chatSettings
+    GroupSettings {..} = chatStateSettings
 
 addVoteToPoll
-  :: ChatState
+  :: MonadIO m
+  => ChatState
   -> VoterId -- ^ Voter
   -> SpamerId -- ^ Spamer candidate
   -> PollState
-  -> (PollState, ChatState)
-addVoteToPoll st@ChatState{..} voterId spamerId poll =
-  let nextPoll = case HM.lookup spamerId activePolls of
-        Nothing -> poll { pollVoters = HS.insert voterId (pollVoters poll) }
-        Just ps@PollState{..} -> ps { pollVoters = HS.insert voterId pollVoters }
-  in (nextPoll, st { activePolls = HM.insert spamerId nextPoll activePolls })
+  -> m (PollState, ChatState)
+addVoteToPoll st@ChatState{..} voterId spamerId poll = liftIO do
+  nextPoll <- HT.lookup chatStateActivePolls spamerId >>= \case
+    Nothing -> pure
+      $! poll { pollVoters = HS.insert voterId (pollVoters poll) }
+    Just ps@PollState{..} -> pure $! ps { pollVoters = HS.insert voterId pollVoters }
+  HT.insert chatStateActivePolls spamerId nextPoll
+  pure (nextPoll, st)
 
 data PollState = PollState
   { pollMessageId :: MessageId
-  , pollVoters :: HashSet VoterId
+  , pollVoters :: HS.HashSet VoterId
   , pollSpamer :: UserInfo
   , pollSpamMessageId :: MessageId
   }

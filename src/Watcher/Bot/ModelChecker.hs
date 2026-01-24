@@ -162,6 +162,8 @@ tuneChatExport file mFromId ExportedChat{..} = do
             , chatLastName = Nothing
             , chatIsForum = Nothing
             }
+          txt = Text.unwords $ catMaybes $ fmap exportTextEntityText $ fromMaybe [] exportedMessageTextEntities 
+
           message = Message
             { messageMessageId = MessageId exportedMessageId
             , messageMessageThreadId = Nothing
@@ -249,10 +251,9 @@ tuneChatExport file mFromId ExportedChat{..} = do
             , messageWebAppData = Nothing
             , messageReplyMarkup = Nothing
             }
-          ch = newChatState botSettings
-          decision = decideAboutMessage ch user message
-          txt = Text.unwords $ catMaybes $ fmap exportTextEntityText $ fromMaybe [] exportedMessageTextEntities 
-          entry = ChatExportTuningEntry
+      ch <- newChatState botSettings
+      decision <- decideAboutMessage ch user message
+      let entry = ChatExportTuningEntry
             { chatExportTuningEntryChatId = exportedChatId
             , chatExportTuningEntryMessageId = exportedMessageId
             , chatExportTuningEntryUserId = userId

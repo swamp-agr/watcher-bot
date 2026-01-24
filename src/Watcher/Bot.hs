@@ -22,6 +22,7 @@ import Telegram.Bot.Simple.BotApp.Internal
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
 import qualified Options.Applicative as OA
 
 import Watcher.Bot.Cache
@@ -86,26 +87,28 @@ getSelf = do
   atomically $ modifyTVar' self (const $ Just botItself)
 
 
-gatherCacheStats :: (a ~ cache content, Foldable cache) => Text -> TVar a -> IO Text
-gatherCacheStats title cache = do
-  cacheSize <- getCacheSize cache
+gatherCacheStats
+  :: Foldable cache => Text -> TVar a -> (a -> IO (cache content)) -> IO Text
+gatherCacheStats title cache modifier = do
+  cacheSize <- getCacheSize cache modifier
   pure $ Text.concat
     [ title, ": ", s2t cacheSize]
 
 gatherBlocklistStats :: TVar Blocklist -> IO Text
 gatherBlocklistStats cache =  do
-  content <- readCacheWith spamerBans cache
+  content <- readCacheWith blocklistSpamerBans cache
+  size <- HT.size content
   pure $ Text.concat
-    [ "Blocklist: " <> s2t (HM.size content) ]
+    [ "Blocklist: " <> s2t size ]
 
 gatherStatistics :: WithBotState => IO ()
 gatherStatistics = every statistics $ do
-  groupsStats <- gatherCacheStats "Groups" groups
-  adminsStats <- gatherCacheStats "Admins" admins
-  usersStats <- gatherCacheStats "Users" users
+  groupsStats <- gatherCacheStats "Groups" groups fromHMap
+  adminsStats <- gatherCacheStats "Admins" admins fromHMap
+  usersStats <- gatherCacheStats "Users" users fromHMap
   blocklistStats <- gatherBlocklistStats blocklist
-  spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages
-  eventSetStats <- gatherCacheStats "Self-destruct message queue" eventSet
+  spamMessagesStats <- gatherCacheStats "Spam messages" spamMessages fromHMap
+  eventSetStats <- gatherCacheStats "Self-destruct message queue" eventSet pure
   replyStats $ Text.unlines
     [ "Statistics"
     , ""
@@ -143,11 +146,12 @@ autoban = do
               ]
         replyStats message
 
-  groupsMap <- readCache groups
+  groupsMap <- fromHMap =<< readCache groups
   chatCounter <- newIORef (0 :: Int)
 
   messages <- forM (HM.toList groupsMap) $ \(chatId, ChatState{..}) -> do
     chatMemberStats <- newIORef (HM.empty @Text @Int)
+    quarantine <- fromHMap chatStateQuarantine
     forM_ (HM.keys quarantine) $ \userId -> do
       status <- handleCheckChatMember chatId userId
 

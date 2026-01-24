@@ -1,12 +1,12 @@
 module Watcher.Bot.Cache where
 
 import Codec.Compression.Zstd (compress, maxCLevel)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar, newTVarIO)
+import Control.Concurrent.STM
+  (TVar, atomically, readTVar, readTVarIO, newTVarIO, writeTVar)
 import Control.Exception (evaluate)
 import Control.Monad (forM, forM_, join, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Hashable (Hashable)
-import Data.HashMap.Strict (HashMap)
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (Down (..))
@@ -25,11 +25,12 @@ import System.FilePath ((</>), (<.>))
 import qualified Codec.Archive.Tar as Tar
 import qualified Data.ByteString as BS
 import qualified Data.Foldable as Fold
-import qualified Data.HashMap.Strict as HM
+import qualified Data.Vector.Hashtables as HT
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 
 import Watcher.Bot.Settings
+import Watcher.Bot.Types
 
 getAbsoluteCachePath :: FilePath -> IO FilePath
 getAbsoluteCachePath dir = do
@@ -50,18 +51,21 @@ getOrCreateCacheDir time cache = do
   createDirectoryIfMissing True path
   pure path
 
-dumpCache :: (ToDhall a, Show a) => UTCTime -> FilePath ->  TVar a -> IO ()
-dumpCache time dir cache = do
+dumpCache
+  :: (ToDhall out, Show out)
+  => UTCTime -> FilePath ->  TVar cache -> (cache -> IO out) -> IO ()
+dumpCache time dir cache modifier = do
   absoluteDir <- getOrCreateCacheDir time dir
   cachePath <- getAbsoluteCachePath absoluteDir
-  cacheContent <- evaluate =<< (atomically $! readTVar cache)
+  cacheContent <- evaluate =<< modifier =<< (atomically $! readTVar cache)
   let txt = renderPretty cacheContent
   Text.writeFile cachePath txt
 
-getCacheSize :: Foldable cache => TVar (cache content) -> IO Int
-getCacheSize cache = do
-  content <- atomically $! readTVar cache
-  pure $! Fold.length content
+getCacheSize :: Foldable cache => TVar content -> (content -> IO (cache s)) -> IO Int
+getCacheSize cache modifier = do
+  content <- readTVarIO cache
+  cf <- modifier content
+  pure $! Fold.length cf
 
 getRecentCacheFilePathMaybe :: FilePath -> IO (Maybe FilePath)
 getRecentCacheFilePathMaybe dir = do
@@ -73,7 +77,7 @@ getRecentCacheFilePathMaybe dir = do
         pure (makeFullPath <$> mFilePath)
   maybe (pure Nothing) getFullPathMaybe mDayDir
 
-importCache :: (FromDhall a, Monoid a) => FilePath -> IO (TVar a)
+importCache :: (FromDhall a, Monoid a) => FilePath -> IO a
 importCache dir = do
   mDayDir <- getLastFilepath "cache"
   mCache <- forM mDayDir $ \dayDir -> do
@@ -81,7 +85,7 @@ importCache dir = do
     forM mFilePath $ \file -> do
       let fullPath = "." </> "cache" </> dayDir </> dir </> file
       load (Text.pack fullPath)
-  newTVarIO (fromMaybe mempty $ join mCache)
+  pure (fromMaybe mempty $ join mCache)
 
 compareTwoCaches :: FilePath -> IO (Maybe (Integer, Integer))
 compareTwoCaches dir = do
@@ -136,21 +140,26 @@ cleanCache dir = do
 
 lookupCacheWith
   :: (MonadIO m, Hashable k) => TVar cache -> (cache -> HashMap k v) -> k -> m (Maybe v)
-lookupCacheWith cache mapFromCache key = liftIO $! atomically $! do
-  readTVar cache >>= \content -> pure $! HM.lookup key $! mapFromCache content
+lookupCacheWith cache mapFromCache key = liftIO do
+  content <- readTVarIO cache
+  HT.lookup (mapFromCache content) key
 
 lookupCache :: (MonadIO m, Hashable k) => TVar (HashMap k v) -> k -> m (Maybe v)
 lookupCache cache key = lookupCacheWith cache id key
 
 writeCache :: (MonadIO m, Hashable k) => TVar (HashMap k v) -> k -> v -> m ()
-writeCache cache key value =
-  liftIO $! atomically $! modifyTVar' cache $! HM.insert key value 
+writeCache cache key value = liftIO do
+  content <- readTVarIO cache
+  HT.insert content key value
+  atomically $! writeTVar cache content
 
 alterCache
   :: (MonadIO m, Hashable k)
   => TVar (HashMap k v) -> k -> (Maybe v -> Maybe v) -> m ()
-alterCache cache key modifier =
-  liftIO $! atomically $! modifyTVar' cache $! HM.alter modifier key
+alterCache cache key modifier = liftIO do
+  content <- readTVarIO cache
+  HT.alter content modifier key
+  atomically $! writeTVar cache content
 
 readCache
   :: MonadIO m => TVar cache -> m cache

@@ -2,16 +2,15 @@ module Watcher.Bot.State where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar')
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar', readTVarIO, writeTVar)
 import Control.Exception (fromException)
-import Control.Monad (when, unless)
+import Control.Monad (forM_, when, unless, (<=<))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
-import Data.HashMap.Strict (HashMap)
-import Data.HashSet (HashSet)
 import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Text (Text)
+import Data.Vector.Hashtables
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
@@ -33,6 +32,8 @@ import qualified Data.HashSet as HS
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
+import qualified Data.Vector.Mutable as VM
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Integration.CAS
@@ -47,11 +48,33 @@ type Model = BotState
 
 type Groups = HashMap ChatId ChatState
 
+type GroupStorage = HM.HashMap ChatId ChatStorage
+
+transformChatImports
+  :: MonadIO m => GroupStorage -> m Groups
+transformChatImports xs = liftIO (sequenceA (HM.map storageToChatState xs) >>= toHMap)
+
+transformChatExports
+  :: MonadIO m => Groups -> m GroupStorage
+transformChatExports xs = liftIO (fromHMap xs >>= sequenceA . HM.map chatToStorage)
+
 type Admins = HashMap UserId (HashSet (ChatId, Maybe Text))
+
+type AdminStorage = HM.HashMap UserId (HS.HashSet (ChatId, Maybe Text))
+
+transformAdminImports :: MonadIO m => AdminStorage -> m Admins
+transformAdminImports xs = liftIO (sequenceA (HM.map toHSet xs) >>= toHMap)
+
+transformAdminExports :: MonadIO m => Admins -> m AdminStorage
+transformAdminExports xs = liftIO (fromHMap xs >>= sequenceA . HM.map fromHSet)
 
 type Users = HashMap UserId UserState
 
+type UserStorage = HM.HashMap UserId UserState
+
 type SpamMessages = HashMap MessageText Int
+
+type SpamMessageStorage = HM.HashMap MessageText Int
 
 type Events = Set TriggeredEvent
 
@@ -76,16 +99,17 @@ data BotState = BotState
 newBotState :: Settings -> IO BotState
 newBotState settings@Settings{..} = do
   logEnv <- makeLogEnv
-  admins <- newTVarIO HM.empty
+  admins <- newTVarIO =<< HT.initialize 0
   clientEnv <- createTelegramClientEnv
     (Token botToken) (fromIntegral botConnectionCount) (fromIntegral botResponseTimeout)
-  groups <- newTVarIO HM.empty
-  users <- newTVarIO HM.empty
-  blocklist <- newTVarIO newBlocklist
-  spamMessages <- newTVarIO HM.empty
+  groups <- newTVarIO =<< HT.initialize 0
+  users <- newTVarIO =<< HT.initialize 0
+  blocklist <- newTVarIO =<< storageToBlocklist mempty
+  spamMessages <- newTVarIO =<< HT.initialize 0
   requestLock <- newMVar ()
   eventSet <- newTVarIO Set.empty
-  let adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
+  let adultEmojiSet = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
+  adultEmoji <- toHSet adultEmojiSet
   self <- newTVarIO Nothing
   casClient <- newCasClient
   pure BotState { botSettings = settings, .. }
@@ -93,8 +117,8 @@ newBotState settings@Settings{..} = do
 importBotState :: Settings -> IO BotState
 importBotState settings@Settings {..} = do
   let StorageSettings {..} = storage
-      adultEmoji = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
-
+      adultEmojiSet = Text.foldl' (flip HS.insert) HS.empty . scoreAdultEmoji $! scores
+  adultEmoji <- toHSet adultEmojiSet
   clientEnv <- createTelegramClientEnv
     (Token botToken) (fromIntegral botConnectionCount) (fromIntegral botResponseTimeout)
   requestLock <- newMVar ()
@@ -102,12 +126,12 @@ importBotState settings@Settings {..} = do
   logEnv <- makeLogEnv
   casClient <- newCasClient
 
-  admins <- importCache adminsPath
-  groups <- importCache groupsPath
-  users <- importCache usersPath
-  blocklist <- importCache blocklistPath
-  spamMessages <- importCache spamMessagesPath
-  eventSet <- importCache eventSetPath
+  admins <- newTVarIO =<< transformAdminImports =<< importCache adminsPath
+  groups <- newTVarIO =<< transformChatImports =<< importCache groupsPath
+  users <- newTVarIO =<< toHMap =<< importCache usersPath
+  blocklist <- newTVarIO =<< storageToBlocklist =<< importCache blocklistPath
+  spamMessages <- newTVarIO =<< toHMap =<< importCache spamMessagesPath
+  eventSet <- newTVarIO =<< importCache eventSetPath
 
   pure $ BotState { botSettings = settings, .. }
 
@@ -133,60 +157,118 @@ createTelegramClientEnv token connCount timeoutSec = do
     <*> pure (botBaseUrl token)
 
 data BanState = BanState
-  { bannedMessages :: HashSet MessageText
-  , bannedChats :: HashSet ChatId
+  { banStateMessages :: HashSet MessageText
+  , banStateChats :: HashSet ChatId
+  }
+
+data Blocklist = Blocklist
+  { blocklistSpamerBans :: HashMap UserId BanState
+  , blocklistSpamerUsernames :: HashMap Text UserId
+  }
+
+data BanStateStorage = BanStateStorage
+  { bannedMessages :: HS.HashSet MessageText
+  , bannedChats :: HS.HashSet ChatId
   } deriving (Eq, Show, Generic, FromDhall, ToDhall)
 
-instance Semigroup BanState where
-  a <> b = BanState
+instance Semigroup BanStateStorage where
+  a <> b = BanStateStorage
     { bannedMessages = HS.union (bannedMessages a) (bannedMessages b)
     , bannedChats = HS.union (bannedChats a) (bannedChats b)
     }
 
-newBanState :: BanState
-newBanState = BanState
+instance Monoid BanStateStorage where
+  mempty = newBanStateStorage
+
+newBanState :: IO BanState
+newBanState = storageToBanState newBanStateStorage
+
+newBanStateStorage :: BanStateStorage
+newBanStateStorage = BanStateStorage
   { bannedMessages = HS.empty
   , bannedChats = HS.empty
   }
 
-data Blocklist = Blocklist
-  { spamerBans :: HashMap UserId BanState
-  , spamerUsernames :: HashMap Text UserId
+storageToBanState :: BanStateStorage -> IO BanState
+storageToBanState BanStateStorage {..} = do
+  banStateMessages <- toHSet bannedMessages
+  banStateChats <- toHSet bannedChats
+  pure BanState {..}
+
+banStateToStorage :: BanState -> IO BanStateStorage
+banStateToStorage BanState {..} = do
+  bannedMessages <- fromHSet banStateMessages
+  bannedChats <- fromHSet banStateChats
+  pure BanStateStorage {..}
+
+data BlocklistStorage = BlocklistStorage
+  { spamerBans :: HM.HashMap UserId BanStateStorage
+  , spamerUsernames :: HM.HashMap Text UserId
   }
   deriving (Eq, Show, Generic, FromDhall, ToDhall)
 
-instance Semigroup Blocklist where
-  a <> b = Blocklist
+instance Semigroup BlocklistStorage where
+  a <> b = BlocklistStorage
     { spamerBans = spamerBans a <> spamerBans b
     , spamerUsernames = spamerUsernames a <> spamerUsernames b
     }
 
-instance Monoid Blocklist where
-  mempty = newBlocklist
+instance Monoid BlocklistStorage where
+  mempty = newBlocklistStorage
 
-newBlocklist :: Blocklist
-newBlocklist = Blocklist
+newBlocklistStorage :: BlocklistStorage
+newBlocklistStorage = BlocklistStorage
   { spamerBans = HM.empty
   , spamerUsernames = HM.empty
   }
 
+storageToBlocklist :: BlocklistStorage -> IO Blocklist
+storageToBlocklist BlocklistStorage {..} = do
+  let toBanState (k, v) = do
+        banState <- storageToBanState v
+        pure (k, banState)
+  bansList <- mapM toBanState $ HM.toList spamerBans
+  blocklistSpamerBans <- HT.fromList bansList
+  blocklistSpamerUsernames <- toHMap spamerUsernames
+  pure Blocklist {..}
+
+blocklistToStorage :: Blocklist -> IO BlocklistStorage
+blocklistToStorage Blocklist {..} = do
+  spamerBans <- (sequenceA . HM.map banStateToStorage) =<< fromHMap blocklistSpamerBans
+  spamerUsernames <- fromHMap blocklistSpamerUsernames
+  pure BlocklistStorage {..}
+
 alterBlocklist
   :: MonadIO m => TVar Blocklist -> UserInfo -> (Maybe BanState -> Maybe BanState) -> m ()
-alterBlocklist cache UserInfo{..} modifier =
-  let modifyUsername x = case userInfoUsername of
-        Nothing -> x
-        Just username ->
-          let normalUsername = normaliseUsername username
-              insertUsername u = HM.insert u userInfoId x
-          in maybe x insertUsername normalUsername
-      alter b@Blocklist{..} = b
-        { spamerBans = HM.alter modifier userInfoId spamerBans
-        , spamerUsernames = modifyUsername spamerUsernames
-        }
-  in liftIO $! atomically $! modifyTVar' cache $! alter
+alterBlocklist cache UserInfo{..} modifier = do
+  let alterM b@Blocklist{..} = do
+        HT.alter blocklistSpamerBans modifier userInfoId
+        forM_ userInfoUsername \username -> do
+          let mnormalUsername = normaliseUsername username
+          forM_ mnormalUsername \normalUsername -> do
+            HT.insert blocklistSpamerUsernames normalUsername userInfoId
+  liftIO $! do
+    content <- readTVarIO cache
+    alterM content
+    atomically $! writeTVar cache content
+
+alterBlocklistM
+  :: MonadIO m
+  => TVar Blocklist -> UserInfo -> (Maybe BanState -> IO (Maybe BanState)) -> m ()
+alterBlocklistM cache UserInfo{..} modifier = do
+  let alterM b@Blocklist{..} = do
+        liftIO $ HT.alterM blocklistSpamerBans modifier userInfoId
+        forM_ userInfoUsername \username -> do
+          let mnormalUsername = normaliseUsername username
+          forM_ mnormalUsername \normalUsername -> do
+            HT.insert blocklistSpamerUsernames normalUsername userInfoId
+  liftIO $! do
+    content <- readTVarIO cache
+    alterM content
+    atomically $! writeTVar cache content
 
 lookupBlocklist :: MonadIO m => TVar Blocklist -> UserId -> m (Maybe BanState)
-lookupBlocklist cache = lookupCacheWith cache spamerBans
+lookupBlocklist cache = lookupCacheWith cache blocklistSpamerBans
 
 isDebugEnabled :: WithBotState => Bool
 isDebugEnabled = let BotState{..} = ?model in debugEnabled botSettings

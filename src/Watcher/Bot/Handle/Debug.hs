@@ -11,9 +11,9 @@ import Telegram.Bot.API
 import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
-import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Text as Text
+import qualified Data.Vector.Hashtables as HT
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Handle.Ban
@@ -52,11 +52,13 @@ debugSetup Message{..} = do
       readyOrNot = True
       group = (chatId, chatUsername)
   forM_ mUserId $ \userId' -> do
+    singleAdmin <- liftIO $ toHSet $ HS.singleton userId'
+    ncs <- liftIO $ newChatState botSettings
     let go Nothing = Just
-          $! (newChatState botSettings) { chatAdmins = HS.singleton userId' }
+          $! ncs { chatStateAdmins = singleAdmin }
         go (Just v) = Just v
     alterCache groups chatId go
-    writeCache admins userId' $! HS.singleton group
+    writeCache admins userId' =<< liftIO (toHSet (HS.singleton group))
   when readyOrNot $ forM_ mUserId $ \userId' -> setSingleRoot userId' (fst group)
   replySingleGroupRoot readyOrNot (Just chatId) (ReplySetup messageMessageId)
 
@@ -74,24 +76,28 @@ debugSpam msg = do
     liftIO $ logT "this is a reply"
 
     forM_ mUserId $ \userId' -> do
+      ncs <- liftIO $ newChatState botSettings
       let setBan st = case messageText orig of
             Just "admins" -> st { spamCommandAction = SCAdminsCall }
             Just "poll" -> st { spamCommandAction = SCPoll, usersForConsensus = 2 }
             _ -> st
-          setAdmin st = case messageText orig of
-            Just "admins" -> st { chatAdmins = HS.singleton userId' }
-            Just "poll" -> st { chatAdmins = HS.empty }
-            _ -> st { chatAdmins = HS.singleton userId' }
-          ch0 = setAdmin $ newChatState botSettings
-          ch = ch0 { chatSettings = setBan (chatSettings ch0)
-                   , chatSetup = SetupCompleted
+          setAdmin st = do
+            let newAdminSet = case messageText orig of
+                  Just "admins" -> HS.singleton userId'
+                  Just "poll" -> HS.empty
+                  _ -> HS.singleton userId'
+            newAdmins <- liftIO $ toHSet newAdminSet
+            pure $ st { chatStateAdmins = newAdmins }
+      ch0 <- setAdmin ncs
+      let ch = ch0 { chatStateSettings = setBan (chatStateSettings ch0)
+                   , chatStateSetup = SetupCompleted
                      { setupCompletedByAdmin = userId'
                      , setupCompletedAt = now
                      }
                    }
           mid = messageMessageId msg
       writeCache groups chatId ch
-      writeCache admins userId' $! HS.singleton group
+      writeCache admins userId' =<< liftIO (toHSet (HS.singleton group))
 
       handleBanAction chatId ch (VoterId userId') mid $! messageToMessageInfo orig
 
@@ -118,7 +124,7 @@ handleGetChatMember chatId = do
   forM_ ownerGroup $ \OwnerGroupSettings {} -> lookupCache groups chatId >>= \case
     Nothing -> replyText "No data for requested chat"
     Just ChatState{..} -> do
-      case HM.toList quarantine of
+      (liftIO $ HT.toList chatStateQuarantine) >>= \case
         [] -> reply "No users in quarantine"
         xs -> do
           texts <- forM xs $ \(userId, QuarantineState{..}) -> do

@@ -10,6 +10,7 @@ import qualified Data.Text as Text
 import Watcher.Bot.Cache
 import Watcher.Bot.Settings
 import Watcher.Bot.State
+import Watcher.Bot.Types
 import Watcher.Bot.Utils
 
 dumpAllCachesOnce :: (WithBotState, MonadIO m) => m ()
@@ -20,12 +21,12 @@ dumpAllCachesOnce = do
 
   liftIO do
     now <- getCurrentTime
-    dumpCache now groupsPath groups
-    dumpCache now adminsPath admins
-    dumpCache now usersPath users
-    dumpCache now blocklistPath blocklist
-    dumpCache now spamMessagesPath spamMessages
-    dumpCache now eventSetPath eventSet
+    dumpCache now groupsPath groups transformChatExports
+    dumpCache now adminsPath admins transformAdminExports
+    dumpCache now usersPath users fromHMap
+    dumpCache now blocklistPath blocklist blocklistToStorage
+    dumpCache now spamMessagesPath spamMessages fromHMap
+    dumpCache now eventSetPath eventSet pure
 
 
 compareDumps :: (WithBotState, MonadIO m) => m Text

@@ -138,6 +138,7 @@ library
                     , time
                     , unordered-containers
                     , vector
+                    , vector-hashtables
                     , warp
                     , warp-tls
                     , zstd
