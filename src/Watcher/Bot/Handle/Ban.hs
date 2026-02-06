@@ -12,7 +12,6 @@ import Telegram.Bot.API
 import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
-import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as Set
 import qualified Data.Text as Text
@@ -31,12 +30,13 @@ import Watcher.Bot.Utils
 handleBanAction
   :: WithBotState => ChatId -> ChatState -> VoterId -> MessageId -> MessageInfo -> BotM ()
 handleBanAction chatId ch@ChatState{..} voterId messageId orig = do
-  void $ call $ deleteMessage chatId messageId
-  forwardToOwnersMaybe Spam chatId (messageInfoId orig)
   voterIsAdmin <- liftIO (isJust <$> HT.lookup chatStateAdmins (coerce @_ @UserId voterId))
   if voterIsAdmin
     then handleBanByAdmin chatId ch orig
     else handleBanByRegularUser chatId ch (Just voterId) orig
+  -- remove bot message itself
+  void $ call $ deleteMessage chatId messageId
+  forwardToOwnersMaybe Spam chatId (messageInfoId orig)
 
 handleAdminBan
   :: WithBotState
@@ -241,14 +241,15 @@ proceedWithPoll ch@ChatState{..} chatId spamerId voterId mOrig (pollChanged, pol
       enoughToBan = fromIntegral consensus <= voters || voterIsAdmin
   case (not pollChanged, enoughToBan) of
     -- Poll message has been originated, nothing to worry about
-    (True, _) -> pure ()
+    (True, False) -> pure ()
     (False, False) ->
       updateBanPoll ch chatId spamerId voters consensus poll
     (_, True)  -> do
+      -- remove spam message first thing
+      void $ call $ deleteMessage chatId pollSpamMessageId
       forM_ mOrig $! updateBlocklistAndMessages chatId []
       unlessDebug $! banSpamerInChat chatId pollSpamer
       closeBanPoll ch chatId spamerId
-      void $ call $ deleteMessage chatId pollSpamMessageId
       void $ call $ deleteMessage chatId pollMessageId
       removeAllQuarantineMessages ch chatId spamerId
       selfDestructReply chatId ch (ReplyConsensus voters)
