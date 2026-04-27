@@ -30,6 +30,7 @@ let ScoreSettings =
       , scoreMajorThreshold : Natural
       , scoreCriticalThreshold : Natural
       , scoreCopyPaste : Natural
+      , scoreMessageQuote : Natural
       }
 let _publicHelp =
     ''
@@ -99,6 +100,7 @@ in
     , scoreMajorThreshold = 500
     , scoreCriticalThreshold = 1000
     , scoreCopyPaste = 500
+    , scoreMessageQuote = 1000
     } : ScoreSettings
 , helpSettings =
     { publicHelp = _publicHelp

@@ -221,6 +221,7 @@ data UserMessageScore = UserMessageScore
   , userMessageScoreWords :: Map Text Int
   , userMessageScoreCopyPaste :: Int
   , userMessageScoreUsernameWords :: Map Text Int
+  , userMessageScoreQuotes :: Int
   }
   deriving (Eq, Show)
 
@@ -255,6 +256,7 @@ getTotalScore UserMessageScore{..} = sum $
   , userMessageScoreKnownName
   , userMessageScoreRichMarkup
   , userMessageScoreCopyPaste
+  , userMessageScoreQuotes
   ] <> Map.elems userMessageScoreWords <> Map.elems userMessageScoreUsernameWords
 
 data MessageDecision
@@ -363,6 +365,13 @@ messageContainsRichMarkup ScoreSettings{..}
 messageWordsScore :: ScoreSettings -> Message -> Map Text Int
 messageWordsScore score = textWordsScore score . fromMaybe "" . messageText
 
+messageQuoteScore :: ScoreSettings -> Message -> Int
+messageQuoteScore ScoreSettings{..}
+  = (* (fromIntegral scoreMessageQuote))
+  . length
+  . filter ((`elem` [MessageEntityBlockquote, MessageEntityExpandableBlockquote]) . messageEntityType)
+  . fromMaybe [] . messageEntities
+
 -- FIXME: use duckling
 textWordsScore :: ScoreSettings -> Text -> Map Text Int
 textWordsScore ScoreSettings{scoreMessageWordsScore} txt =
@@ -412,6 +421,7 @@ decideAboutMessage ch user@User{userId} msg = do
         , userMessageScoreWords = messageWordsScore scores msg
         , userMessageScoreCopyPaste
         , userMessageScoreUsernameWords = messageUsernameWordsScore scores user
+        , userMessageScoreQuotes = messageQuoteScore scores msg
         }
       totalScore = getTotalScore userMessageScore
 
