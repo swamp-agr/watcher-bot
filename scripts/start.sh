@@ -11,11 +11,11 @@ mkdir -p ./log
 source ~/.bashrc
 
 # normalise config
-~/.cabal/bin/dhall --output ./config/settings.dhall <<< ./config/default.dhall
+~/.local/bin/dhall --output ./config/settings.dhall <<< ./config/default.dhall
 
-~/.cabal/bin/watcher-bot migration
+~/.local/bin/watcher-bot migration
 
-~/.cabal/bin/watcher-bot bot +RTS -A64m -AL256m -qn2 -RTS >> log/watcher-bot.log 2>&1 &
+~/.local/bin/watcher-bot bot +RTS -A64m -AL256m -qn2 -RTS >> log/watcher-bot.log 2>&1 &
 
 # write PID to file
 echo $! > ./watcher-bot.pid

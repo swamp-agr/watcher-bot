@@ -60,6 +60,7 @@ data ScoreSettings = ScoreSettings
   , scoreMajorThreshold :: Natural
   , scoreCriticalThreshold :: Natural
   , scoreCopyPaste :: Natural
+  , scoreMessageQuote :: Natural
   } deriving (Generic, FromDhall, ToDhall, Show)
   
 data HelpSettings = HelpSettings
