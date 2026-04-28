@@ -13,6 +13,7 @@ import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
 import Dhall (Natural)
 import Telegram.Bot.API
+import Telegram.Bot.API.Types.TextQuote (TextQuote(..))
 import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
@@ -366,11 +367,19 @@ messageWordsScore :: ScoreSettings -> Message -> Map Text Int
 messageWordsScore score = textWordsScore score . fromMaybe "" . messageText
 
 messageQuoteScore :: ScoreSettings -> Message -> Int
-messageQuoteScore ScoreSettings{..}
-  = (* (fromIntegral scoreMessageQuote))
-  . length
-  . filter ((`elem` [MessageEntityBlockquote, MessageEntityExpandableBlockquote]) . messageEntityType)
-  . fromMaybe [] . messageEntities
+messageQuoteScore ScoreSettings{..} msg =
+  if hasManualTextQuote msg || hasEntityQuotes msg
+    then fromIntegral scoreMessageQuote
+    else 0
+  where
+    hasEntityQuotes
+      = (> 0)
+      . length
+      . filter ((`elem` [MessageEntityBlockquote, MessageEntityExpandableBlockquote]) . messageEntityType)
+      . fromMaybe [] . messageEntities
+
+    hasManualTextQuote
+      = maybe False ((== Just True) . textQuoteIsManual) . messageQuote
 
 -- FIXME: use duckling
 textWordsScore :: ScoreSettings -> Text -> Map Text Int
