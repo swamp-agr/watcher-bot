@@ -37,6 +37,7 @@ updateToAction settings@Settings{..} update
 
   --   both dm and groups
   | isCommand "setup" update = handleSetup settings update
+  | isCommand "start" update = handleHelp settings update
   | isCommand "help" update = handleHelp settings update
 
   -- callbacks
