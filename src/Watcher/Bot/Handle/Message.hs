@@ -13,7 +13,6 @@ import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
 import Dhall (Natural)
 import Telegram.Bot.API
-import Telegram.Bot.API.Types.TextQuote (TextQuote(..))
 import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
@@ -203,9 +202,8 @@ addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
-      go prev _new = prev -- current strategy: leave previous state, do not flush it
   newUserMap <- liftIO $ HT.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
-  nextQuarantine <- liftIO $ HT.unionWith go chatStateQuarantine newUserMap
+  nextQuarantine <- liftIO $ HT.unionWith (<>) chatStateQuarantine newUserMap
   let nextState = ch { chatStateQuarantine = nextQuarantine }
 
   writeCache groups chatId nextState

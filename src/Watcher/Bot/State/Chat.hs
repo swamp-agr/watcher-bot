@@ -1,5 +1,6 @@
 module Watcher.Bot.State.Chat where
 
+import Control.Applicative ((<|>))
 import Control.Monad.IO.Class (MonadIO (..))
 import Data.Set (Set)
 import Data.Text (Text)
@@ -183,3 +184,13 @@ emptyQuarantineState = QuarantineState
   , quarantineMessageHash = mempty
   , quarantineMessageId = mempty
   }
+
+instance Monoid QuarantineState where
+  mempty = emptyQuarantineState
+
+instance Semigroup QuarantineState where
+  a <> b = QuarantineState
+    { quarantineUserChatInfo = quarantineUserChatInfo a <|> quarantineUserChatInfo b
+    , quarantineMessageHash = quarantineMessageHash a <> quarantineMessageHash b
+    , quarantineMessageId = quarantineMessageId a <> quarantineMessageId b
+    }
