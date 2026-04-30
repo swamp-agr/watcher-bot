@@ -17,7 +17,6 @@ import Telegram.Bot.API.Types.TextQuote (TextQuote(..))
 import Telegram.Bot.API.Names
 import Telegram.Bot.Simple
 
-import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -306,8 +305,8 @@ doesNameContainEmoji ChatState{..} scores u = do
   mQuarantine <- liftIO $ HT.lookup chatStateQuarantine (userId u)
   let mChat = quarantineUserChatInfo =<< mQuarantine
       go :: User -> Bool
-      go u =
-        let txt = getUserName u
+      go user =
+        let txt = getUserName user
 
             chatContainsAnyEmoji ChatInfo{..} =
               isJust chatInfoEmojiStatusCustomEmojiId

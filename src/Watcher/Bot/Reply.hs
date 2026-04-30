@@ -11,7 +11,6 @@ import GHC.Stack (HasCallStack)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
 
-import qualified Data.HashSet as HS
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Vector.Hashtables as HT
