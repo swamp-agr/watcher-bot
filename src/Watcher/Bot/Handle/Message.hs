@@ -368,18 +368,12 @@ messageWordsScore score = textWordsScore score . fromMaybe "" . messageText
 
 messageQuoteScore :: ScoreSettings -> Message -> Int
 messageQuoteScore ScoreSettings{..} msg =
-  if hasManualTextQuote msg || hasEntityQuotes msg
+  if hasTextQuote
     then fromIntegral scoreMessageQuote
     else 0
   where
-    hasEntityQuotes
-      = (> 0)
-      . length
-      . filter ((`elem` [MessageEntityBlockquote, MessageEntityExpandableBlockquote]) . messageEntityType)
-      . fromMaybe [] . messageEntities
-
-    hasManualTextQuote
-      = maybe False ((== Just True) . textQuoteIsManual) . messageQuote
+    hasTextQuote
+      = (isJust . messageQuote) msg && (isJust . messageExternalReply) msg
 
 -- FIXME: use duckling
 textWordsScore :: ScoreSettings -> Text -> Map Text Int
