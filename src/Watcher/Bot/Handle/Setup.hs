@@ -10,7 +10,6 @@ import Data.Time (UTCTime (..), getCurrentTime)
 import Telegram.Bot.API
 import Telegram.Bot.Simple
 
-import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.Vector.Hashtables as HT
 

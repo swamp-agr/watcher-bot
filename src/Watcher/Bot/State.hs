@@ -2,15 +2,14 @@ module Watcher.Bot.State where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, takeMVar, putMVar)
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar', readTVarIO, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (fromException)
-import Control.Monad (forM_, when, unless, (<=<))
+import Control.Monad (forM_, when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
 import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Text (Text)
-import Data.Vector.Hashtables
 import Data.Time (UTCTime (..))
 import Dhall (FromDhall (..), ToDhall (..))
 import GHC.Generics (Generic)
@@ -33,7 +32,6 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Vector.Hashtables as HT
-import qualified Data.Vector.Mutable as VM
 
 import Watcher.Bot.Cache
 import Watcher.Bot.Integration.CAS
@@ -241,7 +239,7 @@ blocklistToStorage Blocklist {..} = do
 alterBlocklist
   :: MonadIO m => TVar Blocklist -> UserInfo -> (Maybe BanState -> Maybe BanState) -> m ()
 alterBlocklist cache UserInfo{..} modifier = do
-  let alterM b@Blocklist{..} = do
+  let alterM Blocklist{..} = do
         HT.alter blocklistSpamerBans modifier userInfoId
         forM_ userInfoUsername \username -> do
           let mnormalUsername = normaliseUsername username
@@ -256,7 +254,7 @@ alterBlocklistM
   :: MonadIO m
   => TVar Blocklist -> UserInfo -> (Maybe BanState -> IO (Maybe BanState)) -> m ()
 alterBlocklistM cache UserInfo{..} modifier = do
-  let alterM b@Blocklist{..} = do
+  let alterM Blocklist{..} = do
         liftIO $ HT.alterM blocklistSpamerBans modifier userInfoId
         forM_ userInfoUsername \username -> do
           let mnormalUsername = normaliseUsername username

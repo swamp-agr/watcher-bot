@@ -2,7 +2,7 @@ module Watcher.Bot.Cache where
 
 import Codec.Compression.Zstd (compress, maxCLevel)
 import Control.Concurrent.STM
-  (TVar, atomically, readTVar, readTVarIO, newTVarIO, writeTVar)
+  (TVar, atomically, readTVar, readTVarIO, writeTVar)
 import Control.Exception (evaluate)
 import Control.Monad (forM, forM_, join, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
