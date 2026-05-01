@@ -69,7 +69,7 @@ analyseMessage chatId ch0 userId message = do
 
   forM_ (messageNewChatMembers message) $ \newcomers -> do
     liftIO $ log' @(Text, _) ("analyseMessage.newcomers", userId)
-    addToQuarantineOrBan chatId ch0 message newcomers
+    addUsersToQuarantineOrBan chatId ch0 message newcomers
 
   mChatState <- lookupCache groups chatId
   let ch = fromMaybe ch0 mChatState
@@ -153,10 +153,11 @@ endQuarantineForUser chatId userId = do
     liftIO $ HT.delete chatStateQuarantine userId
     writeCache groups chatId ch
 
-addToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
-addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
+addUsersToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
+addUsersToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
   let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
+    liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan", newcomer)
     let uid = userId newcomer
         userInfo = userToUserInfo newcomer
 
@@ -217,7 +218,9 @@ addToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
-  newUserMap <- liftIO $ HT.fromList (toQuarantineEntry <$> catMaybes newcomersWithChats)
+      qEntries = toQuarantineEntry <$> catMaybes newcomersWithChats
+  liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan.newEntries", qEntries)
+  newUserMap <- liftIO $ HT.fromList qEntries
   nextQuarantine <- liftIO $ HT.unionWith (<>) chatStateQuarantine newUserMap
   let nextState = ch { chatStateQuarantine = nextQuarantine }
 
