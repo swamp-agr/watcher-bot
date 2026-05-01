@@ -65,7 +65,9 @@ handleTuning Update{..} = do
 
 analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> BotM ()
 analyseMessage chatId ch userId message = do
-  forM_ (messageNewChatMembers message) $ addToQuarantineOrBan chatId ch message
+  forM_ (messageNewChatMembers message) $ \newcomers -> do
+    liftIO $ log' @(Text, _) ("analyseMessage.newcomers", userId)
+    addToQuarantineOrBan chatId ch message newcomers
 
   let messageInfo = messageToMessageInfo message
       fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
@@ -88,20 +90,28 @@ analyseMessage chatId ch userId message = do
     Nothing -> do
       knownSpamMessage <- isKnownSpamMessage messageInfo
       if knownSpamMessage
-        then handleBanByRegularUser chatId ch Nothing messageInfo
+        then do
+          liftIO $ log' @(Text, _) ("analyseMessage.known spam", userId)
+          handleBanByRegularUser chatId ch Nothing messageInfo
         else userIsInChatQuarantine ch userId >>= \case
-          Nothing -> pure ()
-          Just inQuarantine -> forM_ (messageFrom message) $ \user -> do
-            now <- liftIO getCurrentTime
-            (liftIO $ decideAboutMessage ch user message) >>= \case
-              RegularMessage _ ->
-                incrementQuarantineCounter chatId ch userId inQuarantine message
-              ProbablySpamMessage _ ->
-                sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
-              MostLikelySpamMessage _ -> do
-                sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
-                forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
-                handleBanByRegularUser chatId ch Nothing messageInfo
+          Nothing ->
+            liftIO $ log' @(Text, _) ("analyseMessage.NotInQuarantine", userId)
+          Just inQuarantine -> case messageFrom message of
+            Nothing -> liftIO $ log' @(Text, _) $ ("analyseMessage.message.from is empty", userId)
+            Just user -> do
+              now <- liftIO getCurrentTime
+              (liftIO $ decideAboutMessage ch user message) >>= \case
+                RegularMessage _ -> do
+                  liftIO $ log' @(Text, _) ("analyseMessage.msg ok", userId)
+                  incrementQuarantineCounter chatId ch userId inQuarantine message
+                ProbablySpamMessage _ -> do
+                  liftIO $ log' @(Text, _) ("analyseMessage.msg 50/50", userId)
+                  sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
+                MostLikelySpamMessage _ -> do
+                  liftIO $ log' @(Text, _) ("msg spam", userId)
+                  sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+                  forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
+                  handleBanByRegularUser chatId ch Nothing messageInfo
 
 incrementQuarantineCounter
   :: WithBotState => ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
