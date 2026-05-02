@@ -8,7 +8,7 @@ import Data.Coerce (coerce)
 import Data.Char (ord)
 import Data.Foldable (asum)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, maybeToList)
 import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
 import Dhall (Natural)
@@ -69,7 +69,8 @@ analyseMessage chatId ch0 userId message = do
 
   forM_ (messageNewChatMembers message) $ \newcomers -> do
     liftIO $ log' @(Text, _) ("analyseMessage.newcomers", userId)
-    addUsersToQuarantineOrBan chatId ch0 message newcomers
+    let newcomersIncludingSender = (maybeToList . messageFrom $ message) <> newcomers
+    addUsersToQuarantineOrBan chatId ch0 message newcomersIncludingSender
 
   mChatState <- lookupCache groups chatId
   let ch = fromMaybe ch0 mChatState
@@ -153,73 +154,84 @@ endQuarantineForUser chatId userId = do
     liftIO $ HT.delete chatStateQuarantine userId
     writeCache groups chatId ch
 
+-- | Returns 'Nothing', if user was not added to quarantine.
+-- Otherwise User with their chat info optionally.
+addUserToQuarantineOrBan
+  :: WithBotState
+  => ChatId -> ChatState -> Message -> User -> BotM (Maybe (Maybe ChatInfo, User))
+addUserToQuarantineOrBan chatId ch message newcomer = do
+  let BotState {..} = ?model
+
+  liftIO $ log' @(Text, _) ("addUserToQuarantineOrBan", newcomer)
+  let uid = userId newcomer
+      userInfo = userToUserInfo newcomer
+
+      fullBanAction bs@BanState{..} banType messages = do
+        messageSet <- liftIO $ toHSet $ HS.fromList (MessageText <$> messages)
+        let goBans _ = liftIO do
+              HT.insert banStateChats chatId ()
+              nextMessages <- HT.union banStateMessages messageSet
+              pure $! Just $! bs { banStateMessages = nextMessages }
+
+            spamer = userToUserInfo newcomer
+            spamerId = SpamerId $! userInfoId spamer
+
+        liftIO $ alterBlocklistM blocklist userInfo $! goBans
+
+        banSpamerInChat chatId spamer
+        removeAllQuarantineMessages ch chatId spamerId
+        selfDestructReply chatId ch (banType spamer)
+
+  lookupBlocklist blocklist uid >>= \case
+    Just bs -> do
+      fullBanAction bs ReplyUserAlreadyBanned []
+      pure Nothing
+
+    Nothing -> callCasCheck uid >>= \case
+
+      Just messages -> do
+        nbs <- liftIO newBanState
+        fullBanAction nbs ReplyUserCASBanned messages
+        pure Nothing
+
+      Nothing -> do
+        now <- liftIO getCurrentTime
+        userIsSpammer <- (liftIO $ decideAboutMessage ch newcomer message) >>= \case
+          RegularMessage _ -> pure False
+          ProbablySpamMessage _ -> do
+            sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
+            forwardToOwnersMaybe Spam chatId (messageMessageId message)
+            handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+            pure True
+          MostLikelySpamMessage _ -> do
+            sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+            forwardToOwnersMaybe Spam chatId (messageMessageId message)
+            handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+            pure True
+        case userIsSpammer of
+          True -> pure Nothing
+          False -> do
+            let userChatId = SomeChatId $ coerce @_ @ChatId uid
+                evt = UserChatMemberCheckEvent $! UserChatMemberCheck
+                  { userChatMemberCheckChatId = chatId
+                  , userChatMemberCheckUserInfo = userInfo
+                  , userChatMemberCheckTime = addUTCTime (5 * 60) now
+                  }
+            mResponse <- call $ getChat userChatId
+            liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
+            pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
+
 addUsersToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
 addUsersToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
   let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
-    liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan", newcomer)
-    let uid = userId newcomer
-        userInfo = userToUserInfo newcomer
-
-        fullBanAction bs@BanState{..} banType messages = do
-          messageSet <- liftIO $ toHSet $ HS.fromList (MessageText <$> messages)
-          let goBans _ = liftIO do
-                HT.insert banStateChats chatId ()
-                nextMessages <- HT.union banStateMessages messageSet
-                pure $! Just $! bs { banStateMessages = nextMessages }
-
-              spamer = userToUserInfo newcomer
-              spamerId = SpamerId $! userInfoId spamer
-
-          liftIO $ alterBlocklistM blocklist userInfo $! goBans
-
-          banSpamerInChat chatId spamer
-          removeAllQuarantineMessages ch chatId spamerId
-          selfDestructReply chatId ch (banType spamer)
-
-    lookupBlocklist blocklist uid >>= \case
-      Just bs -> do
-        fullBanAction bs ReplyUserAlreadyBanned []
-        pure Nothing
-
-      Nothing -> callCasCheck uid >>= \case
-
-        Just messages -> do
-          nbs <- liftIO newBanState
-          fullBanAction nbs ReplyUserCASBanned messages
-          pure Nothing
-
-        Nothing -> do
-          now <- liftIO getCurrentTime
-          userIsSpammer <- (liftIO $ decideAboutMessage ch newcomer message) >>= \case
-            RegularMessage _ -> pure False
-            ProbablySpamMessage _ -> do
-              sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
-              forwardToOwnersMaybe Spam chatId (messageMessageId message)
-              handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
-              pure True
-            MostLikelySpamMessage _ -> do
-              sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
-              forwardToOwnersMaybe Spam chatId (messageMessageId message)
-              handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
-              pure True
-          case userIsSpammer of
-            True -> pure Nothing
-            False -> do
-              let userChatId = SomeChatId $ coerce @_ @ChatId uid
-                  evt = UserChatMemberCheckEvent $! UserChatMemberCheck
-                    { userChatMemberCheckChatId = chatId
-                    , userChatMemberCheckUserInfo = userInfo
-                    , userChatMemberCheckTime = addUTCTime (5 * 60) now
-                    }
-              mResponse <- call $ getChat userChatId
-              liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
-              pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
+    addUserToQuarantineOrBan chatId ch message newcomer
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
       qEntries = toQuarantineEntry <$> catMaybes newcomersWithChats
   liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan.newEntries", qEntries)
+
   newUserMap <- liftIO $ HT.fromList qEntries
   nextQuarantine <- liftIO $ HT.unionWith (<>) chatStateQuarantine newUserMap
   let nextState = ch { chatStateQuarantine = nextQuarantine }
