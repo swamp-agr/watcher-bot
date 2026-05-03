@@ -116,22 +116,23 @@ setupChatSettings st userId time newSettings = st
 startBanPoll
   :: MonadIO m
   => ChatState
-  -> Maybe VoterId
+  -> BanRequestedBy
   -> SpamerId
   -> UserInfo -- ^ Spamer
   -> MessageId -- ^ poll message id
   -> MessageId -- ^ spamer message id
   -> m (PollState, ChatState)
 startBanPoll
-  st@ChatState{..} mVoterId spamerId pollSpamer pollMessageId pollSpamMessageId = liftIO do
-  let newPoll = PollState
+  st@ChatState{..} banReporter spamerId pollSpamer pollMessageId pollSpamMessageId = liftIO do
+  let voterId = toVoterId banReporter
+      newPoll = PollState
         { pollMessageId, pollSpamer, pollSpamMessageId
-        , pollVoters = maybe HS.empty HS.singleton mVoterId
+        , pollVoters = HS.singleton voterId
         }
   poll <- HT.lookup chatStateActivePolls spamerId >>= \case
     Nothing -> pure newPoll
     Just oldPoll -> pure $! oldPoll
-      { pollVoters = maybe HS.empty (flip HS.insert (pollVoters oldPoll)) mVoterId }
+      { pollVoters = HS.insert voterId (pollVoters oldPoll) }
   HT.insert chatStateActivePolls spamerId poll
   pure (poll, st)
 
