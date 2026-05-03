@@ -98,7 +98,7 @@ in
     , scoreMessageWordsScore = ./dictionary.dhall
     , scoreAdultEmoji = "🍀🔫💨💊❄️🍁❣️🍆🐇🐰🔞🥰❤️😘🌹😜🍑💞💋🍒🥵🌈💛👅👄🍌🔥💦💝"
     , scoreMajorThreshold = 500
-    , scoreCriticalThreshold = 1000
+    , scoreCriticalThreshold = 999
     , scoreCopyPaste = 500
     , scoreMessageQuote = 1000
     } : ScoreSettings
