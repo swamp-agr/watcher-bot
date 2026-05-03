@@ -36,6 +36,24 @@ userToUserInfo u@User{..} = UserInfo
   , userInfoUsername = userUsername
   }
 
+userInfoToUser :: UserInfo -> User
+userInfoToUser UserInfo{..} = User
+  { userId = userInfoId
+  , userIsBot = False
+  , userFirstName = userInfoFirstName
+  , userLastName = userInfoLastName
+  , userUsername = userInfoUsername
+  , userLanguageCode = Nothing
+  , userIsPremium = Nothing
+  , userAddedToAttachmentMenu = Nothing
+  , userCanJoinGroups = Nothing
+  , userCanReadAllGroupMessages = Nothing
+  , userSupportsInlineQueries = Nothing
+  }
+
+dummyUser :: User
+dummyUser = userInfoToUser . makeUserInfo . UserId $ 1
+
 chatFullInfoToUserInfo :: ChatFullInfo -> UserInfo
 chatFullInfoToUserInfo cf = UserInfo
   { userInfoId = coerce @_ @UserId (chatFullInfoId cf)
@@ -45,6 +63,9 @@ chatFullInfoToUserInfo cf = UserInfo
       (coerce @_ @Integer . chatFullInfoId) chatFullInfoUsername getChatFullInfoName cf
   , userInfoUsername = chatFullInfoUsername cf
   }
+
+chatFullInfoToUser :: ChatFullInfo -> User
+chatFullInfoToUser = userInfoToUser . chatFullInfoToUserInfo
 
 class ToUserInfo a where
   toUserInfo :: a -> UserInfo
