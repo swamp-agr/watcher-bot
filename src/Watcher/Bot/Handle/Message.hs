@@ -279,6 +279,7 @@ userMessageScoreToText ums@UserMessageScore{..} = Text.unlines
   , wrapMap "Words" (Map.toList userMessageScoreWords)
   , wrap "Copy Paste" userMessageScoreCopyPaste
   , wrapMap "Username words" (Map.toList userMessageScoreUsernameWords)
+  , wrap "Quotes / External reply" userMessageScoreQuotes
   , ""
   , wrap "Total score" (getTotalScore ums)
   ]
