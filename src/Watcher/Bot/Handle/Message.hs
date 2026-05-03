@@ -1,7 +1,7 @@
 module Watcher.Bot.Handle.Message where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent.STM (atomically, modifyTVar')
+import Control.Concurrent.STM (atomically, readTVarIO, modifyTVar')
 import Control.Monad (forM, forM_, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
@@ -81,6 +81,8 @@ analyseMessage chatId ch0 userId message = do
         banSpamerInChat chatId spamer
         removeAllQuarantineMessages ch chatId (SpamerId userId)
         selfDestructReply chatId ch (banType spamer)
+  botItself <- liftIO $ readTVarIO self
+  let mBotId = userInfoId <$> botItself
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere userId
   if userAlreadyBanned
     -- if user has banned globally but was unbanned locally, bot will allow such a user
@@ -97,7 +99,8 @@ analyseMessage chatId ch0 userId message = do
         if knownSpamMessage
           then do
             liftIO $ log' @(Text, _) ("analyseMessage.known spam", userId)
-            handleBanByRegularUser chatId ch Nothing messageInfo
+            forM_ mBotId \botId ->
+              handleBanByRegularUser chatId ch (ByBot botId) messageInfo
           else userIsInChatQuarantine ch userId >>= \case
             Nothing ->
               liftIO $ log' @(Text, _) ("analyseMessage.NotInQuarantine", userId)
@@ -117,7 +120,8 @@ analyseMessage chatId ch0 userId message = do
                     liftIO $ log' @(Text, _) ("msg spam", userId)
                     sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
                     forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
-                    handleBanByRegularUser chatId ch Nothing messageInfo
+                    forM_ mBotId \botId ->
+                      handleBanByRegularUser chatId ch (ByBot botId) messageInfo
 
 incrementQuarantineCounter
   :: WithBotState => ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
@@ -162,6 +166,9 @@ addUserToQuarantineOrBan
 addUserToQuarantineOrBan chatId ch message newcomer = do
   let BotState {..} = ?model
 
+  botItself <- liftIO $ readTVarIO self
+  let mBotId = userInfoId <$> botItself
+
   liftIO $ log' @(Text, _) ("addUserToQuarantineOrBan", newcomer)
   let uid = userId newcomer
       userInfo = userToUserInfo newcomer
@@ -201,12 +208,14 @@ addUserToQuarantineOrBan chatId ch message newcomer = do
           ProbablySpamMessage _ -> do
             sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
             forwardToOwnersMaybe Spam chatId (messageMessageId message)
-            handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+            forM_ mBotId \botId ->
+              handleBanByRegularUser chatId ch (ByBot botId) (messageToMessageInfo message)
             pure True
           MostLikelySpamMessage _ -> do
             sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
             forwardToOwnersMaybe Spam chatId (messageMessageId message)
-            handleBanByRegularUser chatId ch Nothing (messageToMessageInfo message)
+            forM_ mBotId \botId ->
+              handleBanByRegularUser chatId ch (ByBot botId) (messageToMessageInfo message)
             pure True
         case userIsSpammer of
           True -> pure Nothing

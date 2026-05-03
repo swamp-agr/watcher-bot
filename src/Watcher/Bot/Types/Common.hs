@@ -1,6 +1,7 @@
 module Watcher.Bot.Types.Common where
 
 import Data.ByteString (ByteString)
+import Data.Coerce (coerce)
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8)
 import Data.Hashable (Hashable)
@@ -25,6 +26,17 @@ newtype MessageHash = MessageHash ByteString
 
 hexSha256 :: Text -> MessageHash
 hexSha256 = MessageHash . Base16.encode . SHA256.hash . encodeUtf8
+
+data BanRequestedBy
+  = ByBot UserId | ByUser VoterId | BySpamer SpamerId | ByAdmin UserId
+  deriving (Eq, Show)
+
+toVoterId :: BanRequestedBy -> VoterId
+toVoterId = \case
+  ByBot userId -> VoterId userId
+  ByUser voterId -> voterId
+  BySpamer spamerId -> coerce spamerId
+  ByAdmin userId -> VoterId userId
 
 newtype SpamerId = SpamerId UserId
   deriving newtype (Eq, Show, Read, Hashable, FromDhall, ToDhall)
