@@ -56,8 +56,9 @@ handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
     case adminBanId of
       AdminAgainstBan _ _ -> do
         void $ call $ deleteMessage chatId messageId
-        liftIO $ HT.delete chatStateAdminCalls spamerId
-        writeCache groups chatId ch
+        liftIO do
+          HT.delete chatStateAdminCalls spamerId
+          HT.insert groups chatId ch
         pure ()
       AdminForBan _ _ -> do
         void $ call $ deleteMessage chatId messageId
@@ -70,7 +71,7 @@ handleAdminBan chatId ch@ChatState{..} userId messageId adminBanId = do
             liftIO do
               HT.delete chatStateAdminCalls spamerId
               HT.delete chatStateQuarantine (coerce @_ @UserId spamerId)
-            writeCache groups chatId ch
+              HT.insert groups chatId ch
             selfDestructReply chatId ch (ReplyUserAlreadyBanned spamer)
 
 banSpamerInChat :: WithBotState => ChatId -> UserInfo -> BotM ()
@@ -131,8 +132,9 @@ handleBanViaAdminsCall
 handleBanViaAdminsCall chatId ch@ChatState{..} spamer orig = do
   let BotState {..} = ?model
       spamerId = SpamerId $! userInfoId spamer
-  liftIO $ HT.insert chatStateAdminCalls spamerId (spamer, orig)
-  writeCache groups chatId ch
+  liftIO do
+    HT.insert chatStateAdminCalls spamerId (spamer, orig)
+    HT.insert groups chatId ch
 
   (call $ getChatAdministrators (SomeChatId chatId)) >>= \case
     Just Response{..} -> if not responseOk
@@ -290,14 +292,16 @@ handleVoteBan chatId ch@ChatState{..} voterId _messageId voteBanId = do
 closeBanPoll :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
 closeBanPoll st@ChatState{..} chatId spamerId = do
   let BotState {..} = ?model
-  liftIO $ HT.delete chatStateActivePolls spamerId
-  writeCache groups chatId st
+  liftIO do
+    HT.delete chatStateActivePolls spamerId
+    HT.insert groups chatId st
 
 allowUserInGroup :: WithBotState => ChatState -> ChatId -> UserId -> BotM ()
 allowUserInGroup st@ChatState{..} chatId userId = do
   let BotState {..} = ?model
-  liftIO $ HT.insert chatStateAllowlist userId ()
-  writeCache groups chatId st
+  liftIO do
+    HT.insert chatStateAllowlist userId ()
+    HT.insert groups chatId st
 
 removeAllQuarantineMessages :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
 removeAllQuarantineMessages ChatState{..} chatId spamerId = do
@@ -336,7 +340,7 @@ createBanPoll st chatId spamerId banReporter consensus spamer messageId = do
       else do
         let pollId = messageMessageId responseResult
         (poll, nextChatState) <- startBanPoll st banReporter spamerId spamer pollId messageId
-        writeCache groups chatId nextChatState
+        liftIO $ HT.insert groups chatId nextChatState
         pure $ Just (False, poll)
 
 updateBanPoll
@@ -350,8 +354,9 @@ updateBanPoll
   -> BotM ()
 updateBanPoll st@ChatState{..} chatId spamerId voters consensus poll@PollState{..} = do
   let BotState {..} = ?model
-  liftIO $ HT.insert chatStateActivePolls spamerId poll
-  writeCache groups chatId st
+  liftIO do
+    HT.insert chatStateActivePolls spamerId poll
+    HT.insert groups chatId st
 
   let keyboard = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = voteButtons chatId spamerId

@@ -36,11 +36,15 @@ import Watcher.Bot.Utils
 handleAnalyseMessage :: WithBotState => ChatId -> UserId -> Message -> BotM ()
 handleAnalyseMessage chatId userId message = do
   let BotState {..} = ?model
-  mChatState <- lookupCache groups chatId
-  forM_ mChatState $ \ch@ChatState{..} -> case chatStateSetup of
-    SetupNone -> pure ()
-    SetupInProgress {} -> pure ()
-    SetupCompleted {} -> analyseMessage chatId ch userId message
+
+  (liftIO $ HT.lookup groups chatId) >>= \case
+    Nothing -> pure ()
+    Just ch -> case chatStateSetup ch of
+      SetupNone -> pure ()
+      SetupInProgress {} -> pure ()
+      SetupCompleted {} -> do
+        analyseMessage chatId ch userId message
+        liftIO $ HT.insert groups chatId ch
 
 handleTuning :: WithBotState => Update -> BotM ()
 handleTuning Update{..} = do
@@ -70,17 +74,15 @@ handleTuning Update{..} = do
         replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
 
 analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> BotM ()
-analyseMessage chatId ch0 userId message = do
+analyseMessage chatId ch userId message = do
   let BotState {..} = ?model
 
   forM_ (messageNewChatMembers message) $ \newcomers -> do
     liftIO $ log' @(Text, _) ("analyseMessage.newcomers", userId)
     let newcomersIncludingSender = (maybeToList . messageFrom $ message) <> newcomers
-    addUsersToQuarantineOrBan chatId ch0 message newcomersIncludingSender
+    addUsersToQuarantineOrBan chatId ch message newcomersIncludingSender
 
-  mChatState <- lookupCache groups chatId
-  let ch = fromMaybe ch0 mChatState
-      messageInfo = messageToMessageInfo message
+  let messageInfo = messageToMessageInfo message
 
       fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
         let spamer = userToUserInfo spamerUser
@@ -150,8 +152,9 @@ incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{.
               { quarantineMessageHash = Set.insert hash quarantineMessageHash
               , quarantineMessageId = Set.insert messageMessageId quarantineMessageId
               }
-        liftIO $ HT.alter chatStateQuarantine go userId
-        writeCache groups chatId ch
+        liftIO do
+          HT.alter chatStateQuarantine go userId
+          HT.insert groups chatId ch
 
 userIsInChatQuarantine :: MonadIO m => ChatState -> UserId -> m (Maybe Int)
 userIsInChatQuarantine ChatState{..} userId = do
@@ -161,23 +164,24 @@ userIsInChatQuarantine ChatState{..} userId = do
 endQuarantineForUser :: (WithBotState, MonadIO m) => ChatId -> UserId -> m ()
 endQuarantineForUser chatId userId = do
   let BotState {..} = ?model
-  mChatState <- lookupCache groups chatId
+  mChatState <- liftIO $ HT.lookup groups chatId
   forM_ mChatState \ch@ChatState{..} -> do
-    liftIO $ HT.delete chatStateQuarantine userId
-    writeCache groups chatId ch
+    liftIO do
+      HT.delete chatStateQuarantine userId
+      HT.insert groups chatId ch
 
 -- | Returns 'Nothing', if user was not added to quarantine.
 -- Otherwise User with their chat info optionally.
-addUserToQuarantineOrBan
+banUserOrPrepareToQuarantine
   :: WithBotState
   => ChatId -> ChatState -> Message -> User -> BotM (Maybe (Maybe ChatInfo, User))
-addUserToQuarantineOrBan chatId ch message newcomer = do
+banUserOrPrepareToQuarantine chatId ch message newcomer = do
   let BotState {..} = ?model
 
   botItself <- liftIO $ readTVarIO self
   let mBotId = userInfoId <$> botItself
 
-  liftIO $ log' @(Text, _) ("addUserToQuarantineOrBan", newcomer)
+  liftIO $ log' @(Text, _) ("banUserOrPrepareToQuarantine", newcomer)
   let uid = userId newcomer
       userInfo = userToUserInfo newcomer
 
@@ -238,11 +242,10 @@ addUserToQuarantineOrBan chatId ch message newcomer = do
             liftIO $ atomically $! modifyTVar' eventSet $! Set.insert evt
             pure $ Just ((toChatInfo . responseResult) <$> mResponse, newcomer)
 
-addUsersToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ()
+addUsersToQuarantineOrBan :: WithBotState => ChatId -> ChatState -> Message -> [User] -> BotM ChatState
 addUsersToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
-  let BotState {..} = ?model
   newcomersWithChats <- forM newcomers $ \newcomer -> do
-    addUserToQuarantineOrBan chatId ch message newcomer
+    banUserOrPrepareToQuarantine chatId ch message newcomer
 
   let toQuarantineEntry (mChat, User{..}) =
         (userId, emptyQuarantineState
@@ -250,14 +253,12 @@ addUsersToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
           , quarantineMessageId = Set.singleton $ messageMessageId message
           })
       qEntries = toQuarantineEntry <$> catMaybes newcomersWithChats
+
+      go qs Nothing = (Just qs)
+      go qs (Just prevQs) = Just $ prevQs <> qs
+  forM_ qEntries \(userId, qs) -> liftIO $ HT.alter chatStateQuarantine (go qs) userId
   liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan.newEntries", qEntries)
-
-  newUserMap <- liftIO $ HT.fromList qEntries
-  nextQuarantine <- liftIO $ HT.unionWith (<>) chatStateQuarantine newUserMap
-  let nextState = ch { chatStateQuarantine = nextQuarantine }
-
-  writeCache groups chatId nextState
-
+  pure ch
 
 data UserMessageScore = UserMessageScore
   { userMessageScoreNoUsername :: Int

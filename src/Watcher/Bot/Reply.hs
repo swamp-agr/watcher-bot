@@ -135,7 +135,7 @@ replyCallAdmins chatId spamerId adminUsernames originalMessage = do
 withCompletedSetup :: WithBotState => ChatId -> (ChatState -> BotM ()) -> BotM ()
 withCompletedSetup chatId action = do
   let BotState {..} = ?model
-  mChatState <- lookupCache groups chatId
+  mChatState <- liftIO $ HT.lookup groups chatId
   -- absence of chat state should be ignored
   forM_ mChatState $ \ch@ChatState{..} -> case chatStateSetup of
     SetupNone -> selfDestructReply chatId ch ReplyNoSetup
@@ -171,7 +171,7 @@ replySingleGroupRoot
   => Bool -> Maybe ChatId -> SetupMessageId -> BotM ()
 replySingleGroupRoot True mChatId messageId = do
   let BotState {..} = ?model
-  mChatState <- maybe (pure Nothing) (lookupCache groups) mChatId
+  mChatState <- maybe (pure Nothing) (liftIO . HT.lookup groups) mChatId
   let setupKeyboard0 = InlineKeyboardMarkup
         { inlineKeyboardMarkupInlineKeyboard = fmap (fmap (uncurry actionButton))
             [ [ ("Users for ban consensus", ConsensusRoot) ]

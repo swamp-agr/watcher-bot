@@ -57,7 +57,7 @@ debugSetup Message{..} = do
     let go Nothing = Just
           $! ncs { chatStateAdmins = singleAdmin }
         go (Just v) = Just v
-    alterCache groups chatId go
+    liftIO $ HT.alter groups go chatId
     writeCache admins userId' =<< liftIO (toHSet (HS.singleton group))
   when readyOrNot $ forM_ mUserId $ \userId' -> setSingleRoot userId' (fst group)
   replySingleGroupRoot readyOrNot (Just chatId) (ReplySetup messageMessageId)
@@ -96,7 +96,7 @@ debugSpam msg = do
                      }
                    }
           mid = messageMessageId msg
-      writeCache groups chatId ch
+      liftIO $ HT.insert groups chatId ch
       writeCache admins userId' =<< liftIO (toHSet (HS.singleton group))
 
       handleBanAction chatId ch (VoterId userId') mid $! messageToMessageInfo orig
@@ -121,7 +121,7 @@ handleGetChatMember :: WithBotState => ChatId -> BotM ()
 handleGetChatMember chatId = do
   let BotState{..} = ?model
       Settings {..} = botSettings
-  forM_ ownerGroup $ \OwnerGroupSettings {} -> lookupCache groups chatId >>= \case
+  forM_ ownerGroup $ \OwnerGroupSettings {} -> (liftIO $ HT.lookup groups chatId) >>= \case
     Nothing -> replyText "No data for requested chat"
     Just ChatState{..} -> do
       (liftIO $ HT.toList chatStateQuarantine) >>= \case
