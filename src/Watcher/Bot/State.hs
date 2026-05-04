@@ -85,7 +85,7 @@ data BotState = BotState
   , logEnv :: LogEnv
   , casClient :: Manager
   -- caches
-  , groups :: TVar Groups
+  , groups :: Groups
   , admins :: TVar Admins
   , users :: TVar Users
   , blocklist :: TVar Blocklist
@@ -100,7 +100,7 @@ newBotState settings@Settings{..} = do
   admins <- newTVarIO =<< HT.initialize 0
   clientEnv <- createTelegramClientEnv
     (Token botToken) (fromIntegral botConnectionCount) (fromIntegral botResponseTimeout)
-  groups <- newTVarIO =<< HT.initialize 0
+  groups <- HT.initialize 0
   users <- newTVarIO =<< HT.initialize 0
   blocklist <- newTVarIO =<< storageToBlocklist mempty
   spamMessages <- newTVarIO =<< HT.initialize 0
@@ -125,7 +125,7 @@ importBotState settings@Settings {..} = do
   casClient <- newCasClient
 
   admins <- newTVarIO =<< transformAdminImports =<< importCache adminsPath
-  groups <- newTVarIO =<< transformChatImports =<< importCache groupsPath
+  groups <- transformChatImports =<< importCache groupsPath
   users <- newTVarIO =<< toHMap =<< importCache usersPath
   blocklist <- newTVarIO =<< storageToBlocklist =<< importCache blocklistPath
   spamMessages <- newTVarIO =<< toHMap =<< importCache spamMessagesPath

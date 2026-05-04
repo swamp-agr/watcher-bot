@@ -88,7 +88,7 @@ refreshChatAdmins :: WithBotState => ChatId -> BotM ()
 refreshChatAdmins chatId = do
   let BotState {..} = ?model
   now <- liftIO getCurrentTime
-  mChatState <- lookupCache groups chatId
+  mChatState <- liftIO $ HT.lookup groups chatId
   ncs <- newChatState botSettings
   let st = fromMaybe ncs mChatState
   when True $ do
@@ -106,7 +106,7 @@ refreshChatAdmins chatId = do
               , chatStateAdmins = newChatAdmins
               , chatStateBotIsAdmin = botIsAdmin'
               }
-        liftIO $ writeCache groups chatId newState
+        liftIO $ HT.insert groups chatId newState
 
         mChatResponse <- call $ getChat (SomeChatId chatId)
         let mChatTitle = chatFullInfoTitle =<< (responseResult <$> mChatResponse)
@@ -172,7 +172,7 @@ initGroupSetupMaybe :: WithBotState => UserId -> (ChatId, Maybe Text) -> BotM Bo
 initGroupSetupMaybe userId (chatId, _mChatname) = do
   let BotState {..} = ?model
   now <- liftIO getCurrentTime
-  mChatState <- lookupCache groups chatId
+  mChatState <- liftIO $ HT.lookup groups chatId
 
   case mChatState of
     -- bot does not know anything about the group. that's weird!
@@ -247,15 +247,15 @@ overrideChatSettings
   => ChatId -> ChatState
   -> UserId -> UTCTime -> GroupSettings
   -> BotM ()
-overrideChatSettings chatId chatState userId now chatSettings =
+overrideChatSettings chatId chatState userId now chatSettings = do
   let BotState{..} = ?model
-  in writeCache groups chatId $! setupChatSettings chatState userId now chatSettings
+  liftIO $ HT.insert groups chatId $! setupChatSettings chatState userId now chatSettings
 
 completeGroupSetup :: WithBotState => ChatId -> UserId -> BotM ()
 completeGroupSetup chatId userId = do
   let BotState {..} = ?model
   now <- liftIO getCurrentTime
-  alterCache groups chatId (go now)
+  liftIO $ HT.alter groups (go now) chatId
   where
     go _time Nothing = Nothing
     go time (Just prevState) = Just
@@ -265,7 +265,7 @@ groupSetup :: WithBotState => ChatId -> UserId -> MenuId -> BotM ()
 groupSetup chatId userId menuId = do
   let BotState {..} = ?model
   now <- liftIO getCurrentTime
-  mChatState <- lookupCache groups chatId
+  mChatState <- liftIO $ HT.lookup groups chatId
   ncs <- liftIO $ newChatState botSettings
   let chatState = fromMaybe ncs mChatState
       nextChatSettings = alterSettings (chatStateSettings chatState) menuId

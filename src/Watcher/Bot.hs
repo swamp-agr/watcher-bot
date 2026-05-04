@@ -1,7 +1,7 @@
 module Watcher.Bot where
 
 import Control.Concurrent.Async (Concurrently (..), runConcurrently)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar')
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, modifyTVar')
 import Control.Exception (finally)
 import Control.Monad (forM, forM_, join, void, unless)
 import Control.Monad.IO.Class (liftIO)
@@ -103,7 +103,9 @@ gatherBlocklistStats cache =  do
 
 gatherStatistics :: WithBotState => IO ()
 gatherStatistics = every statistics $ do
-  groupsStats <- gatherCacheStats "Groups" groups fromHMap
+  -- FIXME: there should be a better way
+  groupTVar <- newTVarIO groups
+  groupsStats <- gatherCacheStats "Groups" groupTVar fromHMap
   adminsStats <- gatherCacheStats "Admins" admins fromHMap
   usersStats <- gatherCacheStats "Users" users fromHMap
   blocklistStats <- gatherBlocklistStats blocklist
@@ -146,7 +148,7 @@ autoban = do
               ]
         replyStats message
 
-  groupsMap <- fromHMap =<< readCache groups
+  groupsMap <- fromHMap groups
   chatCounter <- newIORef (0 :: Int)
 
   messages <- forM (HM.toList groupsMap) $ \(chatId, ChatState{..}) -> do

@@ -1,5 +1,6 @@
 module Watcher.Bot.Handle.Dump where
 
+import Control.Concurrent.STM (newTVarIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -21,7 +22,9 @@ dumpAllCachesOnce = do
 
   liftIO do
     now <- getCurrentTime
-    dumpCache now groupsPath groups transformChatExports
+    -- FIXME: there should be a better way
+    groupTVar <- newTVarIO groups
+    dumpCache now groupsPath groupTVar transformChatExports
     dumpCache now adminsPath admins transformAdminExports
     dumpCache now usersPath users fromHMap
     dumpCache now blocklistPath blocklist blocklistToStorage
