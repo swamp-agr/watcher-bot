@@ -192,6 +192,6 @@ instance Monoid QuarantineState where
 instance Semigroup QuarantineState where
   a <> b = QuarantineState
     { quarantineUserChatInfo = quarantineUserChatInfo a <|> quarantineUserChatInfo b
-    , quarantineMessageHash = quarantineMessageHash a <> quarantineMessageHash b
-    , quarantineMessageId = quarantineMessageId a <> quarantineMessageId b
+    , quarantineMessageHash  = quarantineMessageHash a <> quarantineMessageHash b
+    , quarantineMessageId    = quarantineMessageId a <> quarantineMessageId b
     }

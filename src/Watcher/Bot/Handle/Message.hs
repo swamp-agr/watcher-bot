@@ -81,12 +81,14 @@ analyseMessage chatId ch0 userId message = do
   mChatState <- lookupCache groups chatId
   let ch = fromMaybe ch0 mChatState
       messageInfo = messageToMessageInfo message
+
       fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
         let spamer = userToUserInfo spamerUser
         updateBlocklistAndMessages chatId extraMessages messageInfo
         banSpamerInChat chatId spamer
         removeAllQuarantineMessages ch chatId (SpamerId userId)
         selfDestructReply chatId ch (banType spamer)
+
   botItself <- liftIO $ readTVarIO self
   let mBotId = userInfoId <$> botItself
   userAlreadyBanned <- hasUserAlreadyBannedElsewhere userId
@@ -154,7 +156,7 @@ incrementQuarantineCounter chatId ch@ChatState{..} userId inQuarantine Message{.
 userIsInChatQuarantine :: MonadIO m => ChatState -> UserId -> m (Maybe Int)
 userIsInChatQuarantine ChatState{..} userId = do
   mQuarantine <- liftIO $ HT.lookup chatStateQuarantine userId
-  forM mQuarantine (pure . Set.size . quarantineMessageHash)
+  forM mQuarantine (pure . Set.size . quarantineMessageId)
 
 endQuarantineForUser :: (WithBotState, MonadIO m) => ChatId -> UserId -> m ()
 endQuarantineForUser chatId userId = do
@@ -243,7 +245,10 @@ addUsersToQuarantineOrBan chatId ch@ChatState{..} message newcomers = do
     addUserToQuarantineOrBan chatId ch message newcomer
 
   let toQuarantineEntry (mChat, User{..}) =
-        (userId, emptyQuarantineState { quarantineUserChatInfo = mChat })
+        (userId, emptyQuarantineState
+          { quarantineUserChatInfo = mChat
+          , quarantineMessageId = Set.singleton $ messageMessageId message
+          })
       qEntries = toQuarantineEntry <$> catMaybes newcomersWithChats
   liftIO $ log' @(Text, _) ("addUsersToQuarantineOrBan.newEntries", qEntries)
 
