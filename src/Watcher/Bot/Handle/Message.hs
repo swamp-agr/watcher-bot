@@ -8,7 +8,7 @@ import Data.Coerce (coerce)
 import Data.Char (ord)
 import Data.Foldable (asum)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
 import Dhall (Natural)
@@ -42,9 +42,8 @@ handleAnalyseMessage chatId userId message = do
     Just ch -> case chatStateSetup ch of
       SetupNone -> pure ()
       SetupInProgress {} -> pure ()
-      SetupCompleted {} -> do
+      SetupCompleted {} ->
         analyseMessage chatId ch userId message
-        liftIO $ HT.insert groups chatId ch
 
 handleTuning :: WithBotState => Update -> BotM ()
 handleTuning Update{..} = do
@@ -77,10 +76,21 @@ analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> Bo
 analyseMessage chatId ch userId message = do
   let BotState {..} = ?model
 
-  forM_ (messageNewChatMembers message) $ \newcomers -> do
-    liftIO $ log' @(Text, _) ("analyseMessage.newcomers", userId)
-    let newcomersIncludingSender = (maybeToList . messageFrom $ message) <> newcomers
-    addUsersToQuarantineOrBan chatId ch message newcomersIncludingSender
+  forM_ (messageNewChatMembers message) $ \newcomers ->
+    unless (null newcomers) do
+      liftIO do
+        log' @(Text, _) ("analyseMessage.newcomers", userId)
+        qsize <- HT.size $ chatStateQuarantine ch
+        isInQuarantine <- userIsInChatQuarantine ch userId
+        log' @(Text, _, _) ("analyseMessage.quarantine_size_before", chatId, qsize)
+        log' @(Text, _, _) ("analyseMessage.user_in_quarantine", userId, isInQuarantine)
+      nextCh <- addUsersToQuarantineOrBan chatId ch message newcomers
+      liftIO do
+        nextQsize <- HT.size $ chatStateQuarantine nextCh
+        log' @(Text, _, _) ("analyseMessage.quarantine_size_after", chatId, nextQsize)
+        isInQuarantine <- userIsInChatQuarantine nextCh userId
+        log' @(Text, _, _) ("analyseMessage.user_in_quarantine", userId, isInQuarantine)
+        HT.insert groups chatId nextCh
 
   let messageInfo = messageToMessageInfo message
 
@@ -105,13 +115,14 @@ analyseMessage chatId ch userId message = do
         let texts = MessageText <$> messages
         fullBan ReplyUserCASBanned texts
       Nothing -> do
+        ch' <- liftIO $ HT.lookup' groups chatId
         knownSpamMessage <- isKnownSpamMessage messageInfo
         if knownSpamMessage
           then do
             liftIO $ log' @(Text, _) ("analyseMessage.known spam", userId)
             forM_ mBotId \botId ->
-              handleBanByRegularUser chatId ch (ByBot botId) messageInfo
-          else userIsInChatQuarantine ch userId >>= \case
+              handleBanByRegularUser chatId ch' (ByBot botId) messageInfo
+          else userIsInChatQuarantine ch' userId >>= \case
             Nothing ->
               liftIO $ log' @(Text, _) ("analyseMessage.NotInQuarantine", userId)
             Just inQuarantine -> case messageFrom message of
@@ -119,10 +130,10 @@ analyseMessage chatId ch userId message = do
                 liftIO $ log' @(Text, _) $ ("analyseMessage.message.from is empty", userId)
               Just user -> do
                 now <- liftIO getCurrentTime
-                (liftIO $ decideAboutMessage ch user message) >>= \case
+                (liftIO $ decideAboutMessage ch' user message) >>= \case
                   RegularMessage _ -> do
                     liftIO $ log' @(Text, _) ("analyseMessage.msg ok", userId)
-                    incrementQuarantineCounter chatId ch userId inQuarantine message
+                    incrementQuarantineCounter chatId ch' userId inQuarantine message
                   ProbablySpamMessage _ -> do
                     liftIO $ log' @(Text, _) ("analyseMessage.msg 50/50", userId)
                     sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
