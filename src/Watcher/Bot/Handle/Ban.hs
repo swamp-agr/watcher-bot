@@ -1,5 +1,6 @@
 module Watcher.Bot.Handle.Ban where
 
+import Control.Concurrent.STM (readTVarIO)
 import Control.Monad (forM_, void, when, unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
@@ -189,7 +190,7 @@ handleBanViaConsensusPoll chatId ch@ChatState{..} banReporter spamer orig consen
             pure $! Just (pollSizeChanged, nextPollState)
 
         -- at this point poll *must* be created
-        forM_ mPoll $ \poll -> proceedWithPoll ch chatId spamerId (toVoterId banReporter) (Just orig) poll
+        forM_ mPoll $ \poll -> proceedWithPoll ch chatId spamerId banReporter (Just orig) poll
 
 -- | This message is definitely a spam! So let's:
 --
@@ -234,16 +235,21 @@ proceedWithPoll
   => ChatState
   -> ChatId
   -> SpamerId
-  -> VoterId
+  -> BanRequestedBy
   -> Maybe MessageInfo
   -> (Bool, PollState)
   -> BotM ()
-proceedWithPoll ch@ChatState{..} chatId spamerId vid mOrig (pollChanged, poll@PollState{..}) = do
-  voterIsAdmin <- liftIO (isJust <$> HT.lookup chatStateAdmins (coerce @_ @UserId vid))
+proceedWithPoll ch@ChatState{..} chatId spamerId banReporter mOrig (pollChanged, poll@PollState{..}) = do
+  let voterIsBot = case banReporter of
+        ByBot _ -> True
+        _ -> False
+      voterIsAdmin = case banReporter of
+        ByAdmin _ -> True
+        _ -> False
   let consensus = usersForConsensus chatStateSettings
       voters = HS.size pollVoters
       enoughToBan = fromIntegral consensus <= voters || voterIsAdmin
-  case (not pollChanged, enoughToBan) of
+  unless voterIsBot $ case (not pollChanged, enoughToBan) of
     -- Poll message has been originated, nothing to worry about
     (True, False) -> pure ()
     (False, False) ->
@@ -267,9 +273,18 @@ handleVoteBan
   -> VoteBanId
   -> BotM ()
 handleVoteBan chatId ch@ChatState{..} voterId _messageId voteBanId = do
+  let BotState{..} = ?model
   liftIO $ log' @Text "handleVoteBan"
-  let spamerId = voteBanIdToSpamerId voteBanId
+  voterIsAdmin <- liftIO (isJust <$> HT.lookup chatStateAdmins (coerce @_ @UserId voterId))
+  botItself <- liftIO $ readTVarIO self
+  let mBotId = userInfoId <$> botItself
+      spamerId = voteBanIdToSpamerId voteBanId
       selfVote = coerce @SpamerId @UserId spamerId == coerce @VoterId @UserId voterId
+      banReporter = if selfVote then BySpamer (coerce voterId) else
+        if Just voterId == (coerce <$> mBotId)
+          then ByBot (fromMaybe (coerce voterId) mBotId)
+          else if voterIsAdmin then ByAdmin (coerce @_ @UserId voterId) else ByUser voterId
+
   liftIO $ log' (selfVote, not isDebugEnabled)
   -- normally we do not want to vote for/against self
   -- but it is needed for debug only
@@ -287,7 +302,7 @@ handleVoteBan chatId ch@ChatState{..} voterId _messageId voteBanId = do
         VoteForBan _ _ -> do
           (newPoll, nextChatState) <- addVoteToPoll ch voterId spamerId poll
           let pollChanged = HS.size (pollVoters poll) /= HS.size (pollVoters newPoll)
-          proceedWithPoll nextChatState chatId spamerId voterId Nothing (pollChanged, newPoll)
+          proceedWithPoll nextChatState chatId spamerId banReporter Nothing (pollChanged, newPoll)
 
 closeBanPoll :: WithBotState => ChatState -> ChatId -> SpamerId -> BotM ()
 closeBanPoll st@ChatState{..} chatId spamerId = do
