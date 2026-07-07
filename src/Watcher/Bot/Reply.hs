@@ -37,6 +37,7 @@ data ReplyAnswerType
   | ReplyIncompletedSetup
   | ReplyUserHasNotBeenBanned { replyUserHasNotBeenBanned :: UserInfo }
   | ReplyUserHasBeenUnbanned { replyUserHasBeenUnbanned :: UserInfo }
+  | ReplyUserBanned { replyUserBanned :: UserInfo }
   | ReplyUserAlreadyBanned { replyUserAlreadyBanned :: UserInfo }
   | ReplyUserCASBanned { replyUserCASBanned :: UserInfo }
   | ReplyUserRecovered { replyUserRecovered :: UserInfo }
@@ -53,6 +54,12 @@ renderAnswer = \case
     [ "Bot setup has not been completed yet. "
     , "Please consult with the administrator who started setup."
     ]
+  ReplyUserBanned u ->
+    Text.concat
+      [ "User "
+      , userInfoLink u
+      , " as been recognised as a spammer and been removed from the group."
+      ]
   ReplyUserAlreadyBanned u ->
     Text.concat
       [ "User "
@@ -334,4 +341,3 @@ replyBackup backup = do
           { sendDocumentMessageThreadId = Just $ MessageThreadId ownerGroupBackupThreadId
           }
     void $ callIO $ sendDocument doc
-
