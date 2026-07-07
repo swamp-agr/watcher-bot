@@ -535,5 +535,13 @@ messageHasSpamShortcut botName Message{messageText = Just txt} =
     cmd : _ -> Text.toCaseFold cmd `elem` spamShortcuts
     _ -> False
   where
-    spamShortcuts = Text.toCaseFold <$> ["/s", "/s@" <> botName]
+    spamShortcuts =
+      Text.toCaseFold <$>
+        [ "/s"
+        , "/s@" <> botName
+        , "/spam"
+        , "/spam@" <> botName
+        , "/пнх"
+        , "/пнх@" <> botName
+        ]
 messageHasSpamShortcut _ _ = False
