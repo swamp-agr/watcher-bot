@@ -93,6 +93,7 @@ analyseMessage chatId ch userId message = do
         HT.insert groups chatId nextCh
 
   let messageInfo = messageToMessageInfo message
+      repliesToSpamShortcut = messageRepliesToSpamShortcut botSettings message
 
       fullBan banType extraMessages = forM_ (messageFrom message) \spamerUser -> do
         let spamer = userToUserInfo spamerUser
@@ -130,19 +131,25 @@ analyseMessage chatId ch userId message = do
                 liftIO $ log' @(Text, _) $ ("analyseMessage.message.from is empty", userId)
               Just user -> do
                 now <- liftIO getCurrentTime
-                (liftIO $ decideAboutMessage ch' user message) >>= \case
-                  RegularMessage _ -> do
-                    liftIO $ log' @(Text, _) ("analyseMessage.msg ok", userId)
-                    incrementQuarantineCounter chatId ch' userId inQuarantine message
-                  ProbablySpamMessage _ -> do
-                    liftIO $ log' @(Text, _) ("analyseMessage.msg 50/50", userId)
-                    sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
-                  MostLikelySpamMessage _ -> do
-                    liftIO $ log' @(Text, _) ("msg spam", userId)
+                if repliesToSpamShortcut
+                  then do
+                    liftIO $ log' @(Text, _) ("analyseMessage.reply to /s", userId)
                     sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
                     forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
-                    forM_ mBotId \botId ->
-                      handleBanByRegularUser chatId ch (ByBot botId) messageInfo
+                    fullBan ReplyUserBanned []
+                  else (liftIO $ decideAboutMessage ch' user message) >>= \case
+                    RegularMessage _ -> do
+                      liftIO $ log' @(Text, _) ("analyseMessage.msg ok", userId)
+                      incrementQuarantineCounter chatId ch' userId inQuarantine message
+                    ProbablySpamMessage _ -> do
+                      liftIO $ log' @(Text, _) ("analyseMessage.msg 50/50", userId)
+                      sendEvent (chatEvent now chatId EventGroupRecogniseProbablySpam)
+                    MostLikelySpamMessage _ -> do
+                      liftIO $ log' @(Text, _) ("msg spam", userId)
+                      sendEvent (chatEvent now chatId EventGroupRecogniseMostLikelySpam)
+                      forwardToOwnersMaybe Spam chatId (messageInfoId messageInfo)
+                      forM_ mBotId \botId ->
+                        handleBanByRegularUser chatId ch (ByBot botId) messageInfo
 
 incrementQuarantineCounter
   :: WithBotState => ChatId -> ChatState -> UserId -> Int -> Message -> BotM ()
@@ -517,3 +524,16 @@ replyTuning messageId mMessageThreadId mDecision = do
         , replyMessageMessageThreadId = mMessageThreadId
         }
   reply replyMsg
+
+messageRepliesToSpamShortcut :: Settings -> Message -> Bool
+messageRepliesToSpamShortcut Settings{..} Message{messageReplyToMessage} =
+  maybe False (messageHasSpamShortcut botName) messageReplyToMessage
+
+messageHasSpamShortcut :: Text -> Message -> Bool
+messageHasSpamShortcut botName Message{messageText = Just txt} =
+  case Text.words txt of
+    cmd : _ -> Text.toCaseFold cmd `elem` spamShortcuts
+    _ -> False
+  where
+    spamShortcuts = Text.toCaseFold <$> ["/s", "/s@" <> botName]
+messageHasSpamShortcut _ _ = False
