@@ -18,6 +18,9 @@ import qualified Data.Vector.Mutable as VM
 
 import Watcher.Orphans ()
 
+data MessageCheck = MessageCheck | MessageCheckWithForward
+  deriving (Eq, Show)
+
 newtype MessageText = MessageText Text
   deriving newtype (Eq, Show, Ord, Hashable, FromDhall, ToDhall)
 

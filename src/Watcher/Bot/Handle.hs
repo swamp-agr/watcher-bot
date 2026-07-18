@@ -31,8 +31,8 @@ handleAction (Debug upd) model = model <# do
 handleAction (DebugCallback q) model = model <# do
   handleDebugCallback q
 
-handleAction (Tuning update) model = model <# do
-  handleTuning update
+handleAction (Tuning update check) model = model <# do
+  handleTuning update check
 
 handleAction (GetChatMember chatId) model = model <# do
   handleGetChatMember chatId 
