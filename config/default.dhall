@@ -82,7 +82,7 @@ in
     }
 , scores =
     { scoreUserHasNoUsername = 200
-    , scoreUserNameContainsEmoji = 200
+    , scoreUserNameContainsEmoji = 180
     , scoreUserHasPremium = 200
     , scoreUserAdultScore = 400 -- per emoji
     , scoreUserKnownSpamerNames = 
@@ -97,7 +97,7 @@ in
     , scoreMessageContainsRichMarkup = 30 -- per word
     , scoreMessageWordsScore = ./dictionary.dhall
     , scoreAdultEmoji = "🍀🔫💨💊❄️🍁❣️🍆🐇🐰🔞🥰❤️😘🌹😜🍑💞💋🍒🥵🌈💛👅👄🍌🔥💦💝"
-    , scoreMajorThreshold = 500
+    , scoreMajorThreshold = 600
     , scoreCriticalThreshold = 999
     , scoreCopyPaste = 500
     , scoreMessageQuote = 1000
