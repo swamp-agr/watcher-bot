@@ -26,6 +26,7 @@ updateToAction settings@Settings{..} update
   | isCommand "пнх" update = handleBan settings update
   | isCommand "undo" update = handleUnban settings update
   | isCommand "u" update = handleUnban settings update
+  | isCommand "check" update = handleCheck settings update
 
   --   owner's group
   | isCommand "tuning" update = handleTuning settings update
@@ -72,6 +73,16 @@ handleSetup settings Update{..}
           Just $ SendContactAndQuit groupId $ messageMessageId msg
         Channel groupId -> Just $ SendContactAndQuit groupId $ messageMessageId msg
         Unsupported groupId -> Just $ SendContactAndQuit groupId $ messageMessageId msg
+  | otherwise = Nothing
+
+handleCheck :: Settings -> Update -> Maybe Action
+handleCheck settings upd@Update{..}
+  | Just msg <- asum [ updateMessage, updateEditedMessage ] =
+      case messageSentFrom settings msg of
+        PublicGroup _groupId _chatId -> Just $! Tuning upd
+        OwnerGroup -> Just $! Tuning upd
+        _ -> Nothing
+
   | otherwise = Nothing
 
 handleTuning :: Settings -> Update -> Maybe Action
