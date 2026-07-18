@@ -435,12 +435,12 @@ messageWordsScore score = textWordsScore score . fromMaybe "" . messageText
 
 messageQuoteScore :: ScoreSettings -> Message -> Int
 messageQuoteScore ScoreSettings{..} msg =
-  if hasTextQuote
+  if hasExternalQuote
     then fromIntegral scoreMessageQuote
     else 0
   where
-    hasTextQuote
-      = (isJust . messageQuote) msg && (isJust . messageExternalReply) msg
+    hasExternalQuote
+      = (isJust . messageExternalReply) msg
 
 -- FIXME: use duckling
 textWordsScore :: ScoreSettings -> Text -> Map Text Int
