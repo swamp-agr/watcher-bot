@@ -79,8 +79,8 @@ handleCheck :: Settings -> Update -> Maybe Action
 handleCheck settings upd@Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
-        PublicGroup _groupId _chatId -> Just $! Tuning upd
-        OwnerGroup -> Just $! Tuning upd
+        PublicGroup _groupId _chatId -> Just $! Tuning upd MessageCheck
+        OwnerGroup -> Just $! Tuning upd MessageCheckWithForward
         _ -> Nothing
 
   | otherwise = Nothing
@@ -89,7 +89,7 @@ handleTuning :: Settings -> Update -> Maybe Action
 handleTuning settings upd@Update{..}
   | Just msg <- asum [ updateMessage, updateEditedMessage ] =
       case messageSentFrom settings msg of
-        OwnerGroup -> Just $! Tuning upd
+        OwnerGroup -> Just $! Tuning upd MessageCheckWithForward
         _ -> Nothing
 
   | otherwise = Nothing

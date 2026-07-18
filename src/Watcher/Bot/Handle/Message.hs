@@ -45,32 +45,34 @@ handleAnalyseMessage chatId userId message = do
       SetupCompleted {} ->
         analyseMessage chatId ch userId message
 
-handleTuning :: WithBotState => Update -> BotM ()
-handleTuning Update{..} = do
+handleTuning :: WithBotState => Update -> MessageCheck -> BotM ()
+handleTuning Update{..} check = do
   let BotState {..} = ?model
       mMsg = asum [ updateMessage, updateEditedMessage ]
   forM_ mMsg $ \origMsg -> do
     void $ call $ deleteMessage (chatId $ messageChat origMsg) (messageMessageId origMsg)
     ch <- liftIO $ newChatState botSettings
-    forM_ (messageReplyToMessage origMsg) $ \msg ->
-      forM_ (messageForwardOrigin msg) $ \origin -> do
-        user <- case origin of
-          MessageOriginUser{messageOriginUserSenderUser} -> pure messageOriginUserSenderUser
-          MessageOriginHiddenUser{messageOriginHiddenUserSenderUserName} -> do
+    forM_ (messageReplyToMessage origMsg) $ \msg -> do
+      user <- case check of
+        MessageCheck -> pure $ fromMaybe dummyUser $ messageFrom msg
+        MessageCheckWithForward -> case messageForwardOrigin msg of
+          Just MessageOriginUser{messageOriginUserSenderUser} -> pure messageOriginUserSenderUser
+          Just MessageOriginHiddenUser{messageOriginHiddenUserSenderUserName} -> do
             mUserId <- lookupCacheWith
-              blocklist blocklistSpamerUsernames messageOriginHiddenUserSenderUserName
+                blocklist blocklistSpamerUsernames messageOriginHiddenUserSenderUserName
             case mUserId of
               Nothing -> pure dummyUser
               Just userId' -> do
                 mResponse <- call . getChat  . SomeChatId . coerce @_ @ChatId $ userId'
                 pure $ maybe dummyUser (chatFullInfoToUser . responseResult) mResponse
-          MessageOriginChat{messageOriginChatSenderChat} -> do
-            mResponse <- call . getChat . SomeChatId . chatId $ messageOriginChatSenderChat
-            pure $ maybe dummyUser (chatFullInfoToUser . responseResult) mResponse
+          Just MessageOriginChat{messageOriginChatSenderChat} -> do
+              mResponse <- call . getChat . SomeChatId . chatId $ messageOriginChatSenderChat
+              pure $ maybe dummyUser (chatFullInfoToUser . responseResult) mResponse
 
           _ -> pure dummyUser
-        decision <- decideAboutMessage ch user msg
-        replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
+
+      decision <- decideAboutMessage ch user msg
+      replyTuning (messageMessageId msg) (messageMessageThreadId msg) decision
 
 analyseMessage :: WithBotState => ChatId -> ChatState -> UserId -> Message -> BotM ()
 analyseMessage chatId ch userId message = do
